@@ -4,20 +4,17 @@ FROM node:20-slim AS builder
 # Set working directory
 WORKDIR /usr/src/app
 
-# Install pnpm
-RUN npm install -g pnpm@8.15.5
-
 # Copy only dependency files for better caching
-COPY package.json pnpm-lock.yaml ./
+COPY package.json package-lock.json ./
 
 # Install ALL dependencies (including devDependencies for build)
-RUN pnpm install --frozen-lockfile
+RUN npm ci
 
 # Copy the rest of the source code
 COPY . .
 
 # Build the project (TypeScript compilation + folder structure)
-RUN pnpm run build
+RUN npm run build
 
 # Stage 2: Runtime stage
 FROM node:20-slim
@@ -35,14 +32,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Set working directory
 WORKDIR /usr/src/app
 
-# Install pnpm for production dependency management
-RUN npm install -g pnpm@8.15.5
-
 # Copy only dependency files
-COPY package.json pnpm-lock.yaml ./
+COPY package.json package-lock.json ./
 
 # Install only production dependencies
-RUN pnpm install --prod --frozen-lockfile
+RUN npm ci --omit=dev
 
 # Copy compiled files from the builder stage
 COPY --from=builder /usr/src/app/dist ./dist

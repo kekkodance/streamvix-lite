@@ -186,7 +186,7 @@ function buildUqloadMfpStream(uqloadUrl: string, mfpUrl: string, mfpPsw?: string
 const KEY = Buffer.from('kiemtienmua911ca', 'utf-8');
 const IV = Buffer.from('1234567890oiuytr', 'utf-8');
 
-async function extractLoadM(playerUrl: string, referer: string, mfpUrl?: string, mfpPsw?: string, isSub: boolean = false): Promise<Stream | null> {
+async function extractLoadM(playerUrl: string, referer: string, isSub: boolean = false): Promise<Stream | null> {
     try {
         const parts = playerUrl.split('#');
         const id = parts[1];
@@ -219,27 +219,12 @@ async function extractLoadM(playerUrl: string, referer: string, mfpUrl?: string,
         if (hls) {
             let finalUrl = hls;
 
-            // Wrap in MFP if configured
-            if (mfpUrl) {
-                const proxyUrl = `${mfpUrl.replace(/\/+$/, '')}/proxy/hls/manifest.m3u8`;
-                const params = new URLSearchParams();
-                params.append('d', hls);
-                if (mfpPsw) params.append('api_password', mfpPsw);
-
-                // Pass headers to MFP
-                params.append('h_Referer', playerUrl);
-                params.append('h_Origin', playerDomain);
-                params.append('h_User-Agent', SHARED_HEADERS['User-Agent']);
-
-                finalUrl = `${proxyUrl}?${params.toString()}`;
-            }
-
             return {
                 name: providerLabel('guardaflix'),
                 title: buildUnifiedStreamName({
                     baseTitle: title,
                     isSub: isSub,
-                    proxyOn: !!mfpUrl,
+                    proxyOn: false,
                     provider: 'guardaflix',
                     playerName: 'LoadM',
                     hideProviderInTitle: true
@@ -325,7 +310,7 @@ async function searchGuardaflix(query: string, year: string): Promise<string | n
 
 import * as fs from 'fs';
 
-async function resolvePageStream(pageUrl: string, mfpUrl?: string, mfpPsw?: string): Promise<Stream[]> {
+async function resolvePageStream(pageUrl: string): Promise<Stream[]> {
     const streams: Stream[] = [];
     try {
         const res = await fetchWithBypass(pageUrl);
@@ -364,6 +349,8 @@ async function resolvePageStream(pageUrl: string, mfpUrl?: string, mfpPsw?: stri
 
         // Iterate over option divs and their iframes
         const optionDivs = $('.video.aa-tb[id^="options-"]');
+        const extractionPromises: Promise<Stream[]>[] = [];
+
         for (const optDiv of optionDivs) {
             const optId = $(optDiv).attr('id') || '';
             const lang = optLangMap[optId] || defaultLang;
@@ -373,85 +360,92 @@ async function resolvePageStream(pageUrl: string, mfpUrl?: string, mfpPsw?: stri
             for (const iframe of iframes) {
                 let src = $(iframe).attr('data-src') || $(iframe).attr('src');
                 if (!src) continue;
-
                 if (src.startsWith('//')) src = 'https:' + src;
 
-                // Direct LoadM
-                if (src.includes('loadm.cam') || src.includes('loadm')) {
-                    const stream = await extractLoadM(src, pageUrl, mfpUrl, mfpPsw, isSub);
-                    if (stream) streams.push(stream);
-                }
-                // Uqload via MFP (only if mfpUrl configured)
-                else if (src.includes('uqload') && mfpUrl) {
-                    const stream = buildUqloadMfpStream(src, mfpUrl, mfpPsw, isSub);
-                    streams.push(stream);
-                }
-                // Recursive Embed (trembed)
-                else if (src.includes('trembed=')) {
-                    console.log(`[Guardaflix] Inspecting embed: ${src}`);
-                    try {
-                        const embedRes = await fetchWithBypass(src, { headers: { 'Referer': pageUrl } });
-                        const $embed = cheerio.load(embedRes.data);
-                        const nestedIframes = $embed('iframe');
-                        for (const nested of nestedIframes) {
-                            let nSrc = $(nested).attr('data-src') || $(nested).attr('src');
-                            if (nSrc) {
-                                if (nSrc.startsWith('//')) nSrc = 'https:' + nSrc;
-                                if (nSrc.includes('loadm.cam') || nSrc.includes('loadm')) {
-                                    const stream = await extractLoadM(nSrc, pageUrl, mfpUrl, mfpPsw, isSub);
-                                    if (stream) streams.push(stream);
-                                }
-                                else if (nSrc.includes('uqload') && mfpUrl) {
-                                    const stream = buildUqloadMfpStream(nSrc, mfpUrl, mfpPsw, isSub);
-                                    streams.push(stream);
+                const currentSrc = src;
+                extractionPromises.push((async () => {
+                    const localStreams: Stream[] = [];
+                    // Direct LoadM
+                    if (currentSrc.includes('loadm.cam') || currentSrc.includes('loadm')) {
+                        const stream = await extractLoadM(currentSrc, pageUrl, isSub);
+                        if (stream) localStreams.push(stream);
+                    }
+                    // Recursive Embed (trembed)
+                    else if (currentSrc.includes('trembed=')) {
+                        console.log(`[Guardaflix] Inspecting embed: ${currentSrc}`);
+                        try {
+                            const embedRes = await fetchWithBypass(currentSrc, { headers: { 'Referer': pageUrl } });
+                            const $embed = cheerio.load(embedRes.data);
+                            const nestedIframes = $embed('iframe');
+                            const nestedPromises: Promise<Stream | null>[] = [];
+                            for (const nested of nestedIframes) {
+                                let nSrc = $(nested).attr('data-src') || $(nested).attr('src');
+                                if (nSrc) {
+                                    if (nSrc.startsWith('//')) nSrc = 'https:' + nSrc;
+                                    if (nSrc.includes('loadm.cam') || nSrc.includes('loadm')) {
+                                        nestedPromises.push(extractLoadM(nSrc, pageUrl, isSub));
+                                    }
                                 }
                             }
+                            const nestedResults = await Promise.all(nestedPromises);
+                            for (const ns of nestedResults) if (ns) localStreams.push(ns);
+                        } catch (e) {
+                            console.error(`[Guardaflix] Failed to inspect embed: ${e}`);
                         }
-                    } catch (e) {
-                        console.error(`[Guardaflix] Failed to inspect embed: ${e}`);
                     }
-                }
+                    return localStreams;
+                })());
             }
+        }
+
+        const results = await Promise.all(extractionPromises);
+        for (const group of results) {
+            for (const s of group) streams.push(s);
         }
 
         // Fallback: if no options found, try all iframes directly (legacy behavior)
         if (streams.length === 0) {
             const iframes = $('iframe');
             console.log(`[Guardaflix] Fallback: Found ${iframes.length} iframes on page`);
+            const fallbackPromises: Promise<Stream[]>[] = [];
+
             for (const iframe of iframes) {
                 let src = $(iframe).attr('data-src') || $(iframe).attr('src');
                 if (!src) continue;
                 if (src.startsWith('//')) src = 'https:' + src;
 
-                if (src.includes('loadm.cam') || src.includes('loadm')) {
-                    const stream = await extractLoadM(src, pageUrl, mfpUrl, mfpPsw, false);
-                    if (stream) streams.push(stream);
-                }
-                else if (src.includes('uqload') && mfpUrl) {
-                    const stream = buildUqloadMfpStream(src, mfpUrl, mfpPsw, false);
-                    streams.push(stream);
-                }
-                else if (src.includes('trembed=')) {
-                    try {
-                        const embedRes = await fetchWithBypass(src, { headers: { 'Referer': pageUrl } });
-                        const $embed = cheerio.load(embedRes.data);
-                        const nestedIframes = $embed('iframe');
-                        for (const nested of nestedIframes) {
-                            let nSrc = $(nested).attr('data-src') || $(nested).attr('src');
-                            if (nSrc) {
-                                if (nSrc.startsWith('//')) nSrc = 'https:' + nSrc;
-                                if (nSrc.includes('loadm.cam') || nSrc.includes('loadm')) {
-                                    const stream = await extractLoadM(nSrc, pageUrl, mfpUrl, mfpPsw, false);
-                                    if (stream) streams.push(stream);
-                                }
-                                else if (nSrc.includes('uqload') && mfpUrl) {
-                                    const stream = buildUqloadMfpStream(nSrc, mfpUrl, mfpPsw, false);
-                                    streams.push(stream);
+                const currentSrc = src;
+                fallbackPromises.push((async () => {
+                    const localStreams: Stream[] = [];
+                    if (currentSrc.includes('loadm.cam') || currentSrc.includes('loadm')) {
+                        const stream = await extractLoadM(currentSrc, pageUrl, false);
+                        if (stream) localStreams.push(stream);
+                    }
+                    else if (currentSrc.includes('trembed=')) {
+                        try {
+                            const embedRes = await fetchWithBypass(currentSrc, { headers: { 'Referer': pageUrl } });
+                            const $embed = cheerio.load(embedRes.data);
+                            const nestedIframes = $embed('iframe');
+                            const nestedPromises: Promise<Stream | null>[] = [];
+                            for (const nested of nestedIframes) {
+                                let nSrc = $(nested).attr('data-src') || $(nested).attr('src');
+                                if (nSrc) {
+                                    if (nSrc.startsWith('//')) nSrc = 'https:' + nSrc;
+                                    if (nSrc.includes('loadm.cam') || nSrc.includes('loadm')) {
+                                        nestedPromises.push(extractLoadM(nSrc, pageUrl, false));
+                                    }
                                 }
                             }
-                        }
-                    } catch { }
-                }
+                            const nestedResults = await Promise.all(nestedPromises);
+                            for (const ns of nestedResults) if (ns) localStreams.push(ns);
+                        } catch { }
+                    }
+                    return localStreams;
+                })());
+            }
+            const fallbackResults = await Promise.all(fallbackPromises);
+            for (const group of fallbackResults) {
+                for (const s of group) streams.push(s);
             }
         }
     } catch (e) {
@@ -463,7 +457,22 @@ async function resolvePageStream(pageUrl: string, mfpUrl?: string, mfpPsw?: stri
 // --- HELPER: TMDB ---
 // Keep using native fetch here too for consistency, or generic axios.
 // TMDB API doesn't need proxy usually, but let's stick to simple fetch.
+interface CacheEntry<T> {
+    value: T;
+    expiresAt: number;
+}
+
+const TMDB_TITLE_CACHE = new Map<string, CacheEntry<{ name: string, year: string } | null>>();
+const TMDB_TITLE_CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
+const TMDB_TITLE_CACHE_MAX_SIZE = 10000;
+
 async function getTmdbTitle(type: string, paramId: string, tmdbApiKey?: string): Promise<{ name: string, year: string } | null> {
+    const cacheKey = `${type}:${paramId}`;
+    const cached = TMDB_TITLE_CACHE.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+        return cached.value;
+    }
+
     try {
         const apiKey = tmdbApiKey || '40a9faa1f6741afb2c0c40238d85f8d0';
         const imdbId = paramId.split(':')[0];
@@ -480,11 +489,12 @@ async function getTmdbTitle(type: string, paramId: string, tmdbApiKey?: string):
         const res = await fetchWithTimeout(url, {}, 5000);
         const data: any = await res.json();
 
+        let result: { name: string, year: string } | null = null;
         if (paramId.startsWith('tmdb:')) {
             const name = data.title || data.name || data.original_title || data.original_name;
             const date = data.release_date || data.first_air_date || '';
             const year = date.split('-')[0];
-            return { name, year };
+            result = { name, year };
         } else {
             const results = type === 'series' ? data.tv_results : data.movie_results;
             if (results && results.length > 0) {
@@ -492,14 +502,21 @@ async function getTmdbTitle(type: string, paramId: string, tmdbApiKey?: string):
                 const name = first.title || first.name || first.original_title || first.original_name;
                 const date = first.release_date || first.first_air_date || '';
                 const year = date.split('-')[0];
-                return { name, year };
+                result = { name, year };
             }
         }
 
+        if (TMDB_TITLE_CACHE.size >= TMDB_TITLE_CACHE_MAX_SIZE) {
+            const firstKey = TMDB_TITLE_CACHE.keys().next().value;
+            if (firstKey !== undefined) TMDB_TITLE_CACHE.delete(firstKey);
+        }
+        TMDB_TITLE_CACHE.set(cacheKey, { value: result, expiresAt: Date.now() + TMDB_TITLE_CACHE_TTL });
+        return result;
+
     } catch (e) {
         console.error(`[Guardaflix] TMDB fetch failed: ${e}`);
+        return null;
     }
-    return null;
 }
 
 async function getCinemetaMeta(type: string, paramId: string): Promise<{ name: string, year: string } | null> {
@@ -523,11 +540,11 @@ async function getCinemetaMeta(type: string, paramId: string): Promise<{ name: s
 
 // --- PUBLIC INTERFACE ---
 
-export async function getGuardaflixStreams(type: string, id: string, tmdbApiKey?: string, mfpUrl?: string, mfpPsw?: string): Promise<Stream[]> {
-    return await getGuardaflixStreamsCore(type, id, tmdbApiKey, mfpUrl, mfpPsw);
+export async function getGuardaflixStreams(type: string, id: string, tmdbApiKey?: string): Promise<Stream[]> {
+    return await getGuardaflixStreamsCore(type, id, tmdbApiKey);
 }
 
-async function getGuardaflixStreamsCore(type: string, id: string, tmdbApiKey?: string, mfpUrl?: string, mfpPsw?: string): Promise<Stream[]> {
+async function getGuardaflixStreamsCore(type: string, id: string, tmdbApiKey?: string): Promise<Stream[]> {
     // Only Movies supported for now
     if (type !== 'movie') return [];
 
@@ -561,14 +578,14 @@ async function getGuardaflixStreamsCore(type: string, id: string, tmdbApiKey?: s
                 const engUrl = await searchGuardaflix(engMeta.name, year);
                 if (engUrl) {
                     console.log(`✅ [Guardaflix] Found with English title!`);
-                    return await resolvePageStream(engUrl, mfpUrl, mfpPsw);
+                    return await resolvePageStream(engUrl);
                 }
             }
         }
         return [];
     }
 
-    return await resolvePageStream(pageUrl, mfpUrl, mfpPsw);
+    return await resolvePageStream(pageUrl);
 }
 
 // End of file

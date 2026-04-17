@@ -1,8 +1,8 @@
 {
-    "addonName": "StreamViX | ElfHosted",
-    "addonId": "org.prisonmike.streamvix",
-    "addonDescription": "StreamViX addon con StreamingCommunity, Guardaserie, Altadefinizione, AnimeUnity, AnimeSaturn, AnimeWorld, Eurostreaming, TV ed Eventi Live",
-    "addonVersion": "11.0.23",
+    "addonName": "streamvix-lite",
+    "addonId": "dance.kekko.streamvix-lite",
+    "addonDescription": "streamvix-lite addon con StreamingCommunity, Guardaserie, Guardaflix AnimeUnity, AnimeSaturn, AnimeWorld",
+    "addonVersion": "1",
     "addonLogo": "https://i.imgur.com/sPamibn.png",
     "addonFavicon": "https://raw.githubusercontent.com/qwertyuiop8899/streamvix/refs/heads/main/public/icon.png"
 }

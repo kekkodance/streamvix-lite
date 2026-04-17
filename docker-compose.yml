@@ -1,8 +1,24 @@
-version: "3.9"
 
 services:
-  streamvix:
-    container_name: StreamVix
-    build: .
+  streamvix-lite:
+    image: kekkodance/streamvix-lite:latest
+    container_name: streamvix-lite
     ports:
       - "7860:7860"
+    volumes:
+      - ./config:/usr/src/app/config
+    dns:
+      - 1.1.1.1
+      - 1.0.0.1
+    environment:
+      # - TMDB_API_KEY=your_tmdb_api_key                 # https://www.themoviedb.org/settings/api
+      # - ADDON_BASE_URL=https://yourdomain.com          # For VixSrc to work optimally
+    restart: always
+
+  # Watchtower per aggiornamenti automatici immagine (opzionale)
+  watchtower:
+    image: nickfedor/watchtower:latest
+    container_name: watchtower
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: always

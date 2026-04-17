@@ -37,7 +37,7 @@ export interface AnimeResolvedTitle {
 }
 
 // ─── Cache ──────────────────────────────────────────────────────────
-const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 ore
+const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 giorni
 const MAX_CACHE_SIZE = 5000;
 const cache = new Map<string, { data: AnimeResolvedTitle; expiresAt: number }>();
 

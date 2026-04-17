@@ -70,35 +70,49 @@ export class VixCloudHlsExtractor implements HostExtractor {
       const paramsObj = masterPlaylist.params || {};
       const token = paramsObj.token;
       const expires = paramsObj.expires;
-      const baseUrl: string = masterPlaylist.url || '';
+      let baseUrl: string = masterPlaylist.url || '';
       if (!baseUrl) {
         console.log('[VixCloudHlsExtractor] masterPlaylist.url empty');
         return { streams: [] };
       }
+
+      // Normalizzazione baseUrl: rimuovi parametri rendition/edge se presenti
+      try {
+        const u = new URL(baseUrl);
+        u.search = '';
+        baseUrl = u.toString();
+      } catch {
+        baseUrl = baseUrl.split('?')[0];
+      }
+
       const paramStr = `token=${encodeURIComponent(token)}&expires=${encodeURIComponent(expires)}`;
       let finalUrl: string;
       if (baseUrl.includes('?b')) {
-        finalUrl = baseUrl.replace('?b:1','?b=1') + `&${paramStr}`;
+        finalUrl = baseUrl.replace('?b:1', '?b=1') + `&${paramStr}`;
       } else {
-        finalUrl = baseUrl + (baseUrl.includes('?') ? '&' : '?') + paramStr; // Kotlin always uses ?$params if no ?b
+        finalUrl = baseUrl + (baseUrl.includes('?') ? '&' : '?') + paramStr;
       }
+
       // Richiesta: assicurare suffisso .m3u8 dopo il numero playlist se non presente
       const beforeQuery = finalUrl.split('?')[0];
       if (!/\.m3u8$/i.test(beforeQuery)) {
         const partsF = finalUrl.split('?');
         finalUrl = beforeQuery.replace(/\/$/, '') + '.m3u8' + (partsF[1] ? '?' + partsF.slice(1).join('?') : '');
       }
-      if (parsed.canPlayFHD === true) {
+
+      const isFhd = parsed.canPlayFHD === true || parsed.canPlayFHD === 1;
+      if (isFhd) {
         finalUrl += '&h=1';
       }
-      const title = ctx.titleHint ? `[VIX] ${ctx.titleHint}` : '[VIX] Stream';
+
       const stream: StreamForStremio = {
-        title,
+        title: ctx.titleHint || 'Stream',
         url: finalUrl,
         behaviorHints: {
           notWebReady: false,
           requestHeaders: headers
-        }
+        },
+        isSyntheticFhd: isFhd
       };
       console.log('[VixCloudHlsExtractor] SUCCESS kotlin exact', finalUrl);
       return { streams: [stream] };

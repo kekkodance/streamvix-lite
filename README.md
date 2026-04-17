@@ -1,15 +1,9 @@
 
 <img width="230" height="293" alt="icon" src="https://github.com/user-attachments/assets/11ef8b0e-6d55-44a4-9ccc-ae7031e99f34" />
 
-# 🎬 StreamViX | ElfHosted 
+# 🎬 streamvix-lite
 
 Un addon per Stremio che estrae sorgenti streaming dai siti vixsrc e animeunity animesaturn daddy e vavoo per permetterti di guardare film, serie TV, anime e tv con la massima semplicità.
-
-[Link di Installazione](https://streamvix.hayd.uk/)
-
-Istanza ElfHosted a pagamento CON Mediaflo Proxy incluso (Per Eventi Sportivi) 
-
-[Istanza ElfHosted con Mediaflow](https://store.elfhosted.com/product/streamvix/)
 
 
 ---
@@ -18,12 +12,12 @@ Istanza ElfHosted a pagamento CON Mediaflo Proxy incluso (Per Eventi Sportivi)
 
 * **✅ Supporto Film:** Trova flussi streaming per i film utilizzando il loro ID TMDB. 
 * **📺 Supporto Serie TV:** Trova flussi per ogni episodio di una serie TV, basandosi su ID TMDB in formato stagione/episodio.
-* **🇪🇺 Eurostreaming (ES) Episodi:** Integrazione sperimentale per episodi tramite pulsante toggle (titolo StreamViX ES) con estrazione Python dedicata.
+* **🇪🇺 Eurostreaming (ES) Episodi:** Integrazione sperimentale per episodi tramite pulsante toggle (titolo streamvix-lite ES) con estrazione Python dedicata.
 * **⛩️ Supporto Anime:** Trova flussi per ogni episodio di una determinato Anime, ora supporta ricerca sia da cinemeta, sia da tmdb che da kitsu.
 * **📡 Supporto Live TV:** Canali TV italiani con EPG integrato.
 * **📡 Supporto Eventi Sportivi:** Eventi sportivi aggiornati ogni giorno.
 * **🔗 Integrazione Perfetta:** Si integra meravigliosamente con l'interfaccia di Stremio per un'esperienza utente fluida.
-* **🌐 Proxy Unificato:** Un solo proxy MFP per tutti i contenuti (film, serie, anime, TV, eventi sportivi).
+* **🌐 Proxy Unificato:** Un solo proxy per tutti i contenuti (film, serie, anime, TV, eventi sportivi).
 * **⚽ Eventi Sportivi Avanzati:** 
   - **SPON (Schedule-based):** Matching automatico eventi sportivi con canali Sportzonline (wrap MFP diretto + fallback estrattore TypeScript)
   - **SPSO:** Integrazione playlist SportSOnline con varianti `[SPSO]` OFF
@@ -31,8 +25,8 @@ Istanza ElfHosted a pagamento CON Mediaflo Proxy incluso (Per Eventi Sportivi)
   - **Streamed:** Arricchimento playlist con matching fuzzy e finestre temporali OFF
   - **P🐽D (Pig):** Stream prioritari broadcaster (SKY, DAZN, Eurosport) OFF
 * **🎯 Ottimizzazione Automatica:** MFP wrap diretto per massima velocità, estrattori TypeScript come fallback sicuro
-* **📡 Supporto Live TV:** Canali TV italiani e Eventi Sportivi visibili senza Mediaflow Proxy, scegliere i canali [Vavoo] o con 🏠.
-* **🔓 Supporto Stream Senza Mediaflow Proxy:** Canali TV italiani e Eventi Sportivi, Film e Serie TV, scegliere gli stream con 🔓 per avviarli senza aver bisogno di un MediaflowProxy. (Nota Bene, per avviare gli stream senza proxy ci potrebbe essere bisogno di un player esterno o VLC, prova con il player di default, se non va usa un player esterno tipo VLC)
+* **📡 Supporto Live TV:** Canali TV italiani e Eventi Sportivi visibili senza proxy, scegliere i canali [Vavoo] o con 🏠.
+* **🔓 Supporto Stream Senza Proxy:** Canali TV italiani e Eventi Sportivi, Film e Serie TV, scegliere gli stream con 🔓 per avviarli senza aver bisogno di un proxy. (Nota Bene, per avviare gli stream senza proxy ci potrebbe essere bisogno di un player esterno o VLC, prova con il player di default, se non va usa un player esterno tipo VLC)
 
 
 ---
@@ -66,7 +60,7 @@ http://urladdon/tv/update       avvia arricchimento ALL
 
 ## 🔧 Configurazione Semplificata
 
-StreamViX utilizza un **sistema di proxy unificato** che semplifica la configurazione:
+streamvix-lite utilizza un **sistema di proxy unificato** che semplifica la configurazione:
 
 ### 🌐 Proxy MFP Unificato
 - **Un solo URL e password** per tutti i contenuti (film, serie, anime, TV)
@@ -124,8 +118,8 @@ ADDON_BASE_URL=https://tuo-dominio-o-ip
 
 Note importanti:
 * Nessuno slash finale (✅ `https://mioaddon.example` ❌ `https://mioaddon.example/`).
-* Serve solo su installazioni locali / VPS / Docker self‑host: le istanze pubbliche già integrate (es. quella di default `https://streamvix.hayd.uk`) non richiedono configurazione manuale.
-* Se non la imposti, l'addon userà il fallback interno `https://streamvix.hayd.uk` e i flussi funzioneranno comunque, ma nelle installazioni dietro IP locale/pubby NAT potresti non ottenere il synthetic FHD.
+* Serve solo su installazioni locali / VPS / Docker self‑host: le istanze pubbliche già integrate non richiedono configurazione manuale.
+* Se non la imposti, l'addon userà il fallback interno e i flussi funzioneranno comunque, ma nelle installazioni dietro IP locale/pubby NAT potresti non ottenere il synthetic FHD.
 * La variabile viene usata per costruire l'endpoint interno `/vixsynthetic` (multi‑lingua + best video) — senza un BASE corretto non può generare quell'URL.
 * Non inserire il dominio di VixSrc stesso (verrà ignorato).
 
@@ -138,7 +132,7 @@ Abilita il pairing (Direct/Proxy + varianti Synthetic FHD) anche quando la pill 
 Esempio blocco environment in `docker-compose.yml`:
 ```yaml
 environment:
-    - ADDON_BASE_URL=https://streamvix.miodominio.xyz
+    - ADDON_BASE_URL=https://streamvix-lite.miodominio.xyz
     - MFP_URL=https://mfp.miodominio.xyz
     - MFP_PSW=supersecret
     - VIX_DUAL=1        # opzionale
@@ -151,14 +145,14 @@ Se cambi `ADDON_BASE_URL` riavvia il container / processo per far sì che venga 
 
 Nella pagina di installazione / configurazione dell'addon (landing) ora è mostrato un **badge** subito sopra il toggle VixSrc con il testo:
 
-`Addon Base URL: <valore>` (protocollo rimosso, es: `streamvix.miodominio.xyz`)
+`Addon Base URL: <valore>` (protocollo rimosso, es: `streamvix-lite.miodominio.xyz`)
 
 Questo valore è quello che l'addon ha realmente risolto all'avvio. Usalo per verificare che la tua variabile d'ambiente sia attiva.
 
 | Cosa vedi nel badge | Significato | Azione |
 |---------------------|------------|--------|
 | Il tuo dominio/IP | OK, configurazione corretta | Nessuna |
-| `streamvix.hayd.uk` ma ti aspetti altro | Fallback attivo: `ADDON_BASE_URL` non letta | Controlla variabile + riavvio |
+| Istanza pubblica ma ti aspetti altro | Fallback attivo: `ADDON_BASE_URL` non letta | Controlla variabile + riavvio |
 
 Checklist quando resta il fallback:
 1. Variabile scritta correttamente (maiuscole esatte, niente slash finale).  
@@ -270,8 +264,8 @@ Se vuoi modificare solo la finestra di visibilità estesa fino a una certa ora, 
 
 | Variabile | Default | Descrizione |
 |-----------|---------|-------------|
-| `MFP_URL` | - | **OBBLIGATORIO** - URL MediaFlow Proxy per wrap SPON |
-| `MFP_PASSWORD` / `MFP_PSW` | - | **OBBLIGATORIO** - Password MediaFlow Proxy |
+| `MFP_URL` | - | **OBBLIGATORIO** - URL Proxy per wrap SPON |
+| `MFP_PASSWORD` / `MFP_PSW` | - | **OBBLIGATORIO** - Password Proxy |
 | `SPON_PROG_URL` | auto | URL custom prog.txt Sportzonline (opzionale) |
 | `SPON_PROG_FALLBACKS` | - | URL fallback prog.txt separati da virgola |
 | `SPON_PROG_FORCE_REFRESH` | 0 | 1 = ignora cache 4h prog.txt, refresh sempre |
@@ -697,10 +691,10 @@ Definito un secondo URL identico di backup (non ancora usato automaticamente): s
 
 ## ⚙️ Installazione
 
-Puoi installare StreamViX solamente in locale, su un server casalingo o su una VPN non flaggata o con smartdns per verdere animeunity, 
-per il resto, animesaturn e vixsrc va bene anche Huggingface, ma hanno iniziato a bannare StreamViX, quindi a tuo rischio e pericolo.
-per Le installazioni locali serve sempre un dominio https per installare l'addon. Oppure utilizzare un fork di mediaflow proxy EXE su windows.
-(funziona solo se il pc rimane acceso https://github.com/qwertyuiop8899/mediaflow-proxy_exe/ )
+Puoi installare streamvix-lite solamente in locale, su un server casalingo o su una VPN non flaggata o con smartdns per verdere animeunity, 
+per il resto, animesaturn e vixsrc va bene anche Huggingface, ma hanno iniziato a bannare streamvix-lite, quindi a tuo rischio e pericolo.
+per Le installazioni locali serve sempre un dominio https per installare l'addon. Oppure utilizzare un fork di un Proxy EXE su windows.
+(funziona solo se il pc rimane acceso)
 
 ---
 
@@ -712,14 +706,14 @@ Questo metodo ti permette di avere la tua istanza personale dell'addon online, g
 
 * **Account Render:** Crea un account [qui]([render.com](https://dashboard.render.com/register)).
 * **(OPZIONALE) Chiave API di TMDB:** Ottienine una gratuitamente registrandoti su [The Movie Database (TMDB)](https://www.themoviedb.org/documentation/api).
-* **URL MediaflowProxy (MFP):** Devi avere un'istanza di MediaflowProxy (https://github.com/nzo66/mediaflow-proxy) già deployata su Render/Locale/VPS. Assicurati che sia una versione aggiornata 
+* **URL Proxy (MFP):** Devi avere un'istanza di un proxy già deployata su Render/Locale/VPS. Assicurati che sia una versione aggiornata 
 
 #### Procedura di Installazione
 
 1.  **Crea un Nuovo Space 🆕**
     * Vai su [Render]((https://dashboard.render.com/)) e accedi.
     * Clicca sul + in alto a destra e poi su `Web Service`.
-    * **Public Git Repository:** Incolla il repo `(https://github.com/qwertyuiop8899/StreamViX)`).
+    * **Public Git Repository:** Incolla il repo `(https://github.com/qwertyuiop8899/streamvix-lite)`).
     * **Connect**
     * **Scegli il nome**
     * **Branch** `render`
@@ -731,7 +725,7 @@ Questo metodo ti permette di avere la tua istanza personale dell'addon online, g
     * Una volta che vedi lo stato "Running", il tuo addon è pronto!
 
 3.  **Installa in Stremio 🎬**
-    * Nella pagina principale del tuo Space, in alto a sinistra vedrai un link viola, clicca e configura streamvix per poi installarlo su stremio con gli appositi pulsanti.
+    * Nella pagina principale del tuo Space, in alto a sinistra vedrai un link viola, clicca e configura streamvix-lite per poi installarlo su stremio con gli appositi pulsanti.
 
 
 ---
@@ -746,16 +740,16 @@ Salva il seguente contenuto in un file chiamato `docker-compose.yml`, oppure agg
 
 ```yaml
 services:
-  streamvix:
-    image: qwertyuiop8899/streamvix:latest
-    container_name: streamvix
+  streamvix-lite:
+    image: qwertyuiop8899/streamvix-lite:latest
+    container_name: streamvix-lite
     ports:
       - "7860:7860"
     environment:
       # Configurazione Base (OBBLIGATORIA)
       - BOTHLINK=true
-      - MFP_URL=https://mfp.tuodominio.com  # MediaFlow Proxy URL
-      - MFP_PASSWORD=tuapassword            # MediaFlow Proxy password
+      - MFP_URL=https://mfp.tuodominio.com  # Proxy URL
+      - MFP_PASSWORD=tuapassword            # Proxy password
       - TMDB_API_KEY=tua_chiave_tmdb        # https://www.themoviedb.org/settings/api
       
       # Anime (opzionale)
@@ -771,7 +765,7 @@ services:
       # - STREAMED_ENABLE=1
       
       # Installazione Locale/VPS (opzionale - per FHD VixSrc synthetic)
-      # - ADDON_BASE_URL=https://streamvix.tuodominio.com
+      # - ADDON_BASE_URL=https://streamvix-lite.tuodominio.com
     restart: always
     
   # Watchtower per aggiornamenti automatici immagine (opzionale)
@@ -796,13 +790,13 @@ Con watchtower l'immagine sara' aggiornata automaticamente.
 
 ### 💻 Metodo 3: Installazione Locale (per Esperti NON TESTATO)
 
-Usa questo metodo se vuoi modificare il codice sorgente, testare nuove funzionalità o contribuire allo sviluppo di StreamViX.
+Usa questo metodo se vuoi modificare il codice sorgente, testare nuove funzionalità o contribuire allo sviluppo di streamvix-lite.
 
 1.  **Clona il repository:**
 
     ```bash
-    git clone https://github.com/qwertyuiop8899/StreamViX.git # Assicurati che sia il repository corretto di StreamViX
-    cd StreamViX # Entra nella directory del progetto appena clonata
+    git clone https://github.com/qwertyuiop8899/streamvix-lite.git # Assicurati che sia il repository corretto di streamvix-lite
+    cd streamvix-lite # Entra nella directory del progetto appena clonata
     ```
 
 2.  **Installa le dipendenze:**
@@ -845,7 +839,7 @@ Questo progetto è inteso esclusivamente a scopo educativo. L'utente è l'unico 
 
 ## 🎛️ Disabilitazione Provider Stream
 
-StreamViX supporta la **disabilitazione completa** di singoli provider di stream tramite **variabili d'ambiente** o **modifiche hardcoded nel codice**.
+streamvix-lite supporta la **disabilitazione completa** di singoli provider di stream tramite **variabili d'ambiente** o **modifiche hardcoded nel codice**.
 
 ### 📋 Variabili d'Ambiente Disponibili
 
@@ -967,7 +961,7 @@ grep -n "GDPLAYER_STREAM_DISABLE" src/addon.ts
 
 ## Credits
 
-Original extraction logic written by https://github.com/mhdzumair for the extractor code https://github.com/mhdzumair/mediaflow-proxy 
+Original extraction logic written by https://github.com/mhdzumair for the extractor code. 
 Thanks to https://github.com/ThEditor https://github.com/ThEditor/stremsrc for the main code and stremio addon
 Un ringraziamento speciale a @UrloMythus per gli extractor e per la logica kitsu
 

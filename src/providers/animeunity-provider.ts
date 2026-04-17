@@ -1,6 +1,6 @@
-import { KitsuProvider } from './kitsu';
 import { getDomain } from '../utils/domains';
-import { formatMediaFlowUrl } from '../utils/mediaflow';
+import { providerLabel } from '../utils/unifiedNames';
+
 import { AnimeUnityConfig, StreamForStremio } from '../types/animeunity';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
@@ -45,142 +45,29 @@ const TTL = {
 
 const caches = createCaches();
 
-const PROXY_URL = process.env.AU_PROXY || process.env.PROXY || '';
-const DIRECT_TIMEOUT = 3000; // timeout breve per tentativo diretto (senza proxy)
-let proxyAgent: any = undefined;
-if (PROXY_URL) {
-  if (PROXY_URL.startsWith('socks')) {
-    proxyAgent = new SocksProxyAgent(PROXY_URL);
-  } else {
-    proxyAgent = new HttpsProxyAgent(PROXY_URL);
-  }
-}
-
-// --- Proxy diagnostic helpers ---
-function maskProxyUrl(url: string): string {
-  try {
-    const u = new URL(url);
-    if (u.password) u.password = '***';
-    return u.toString();
-  } catch { return url.replace(/:([^@:]+)@/, ':***@'); }
-}
-
-const PROXY_TYPE = PROXY_URL ? (PROXY_URL.startsWith('socks') ? 'SOCKS' : 'HTTP/HTTPS') : 'NONE';
-if (PROXY_URL) {
-  console.log(`[AnimeUnity][Proxy] Proxy configurato: tipo=${PROXY_TYPE} url=${maskProxyUrl(PROXY_URL)}`);
-} else {
-  console.log('[AnimeUnity][Proxy] Nessun proxy configurato (AU_PROXY e PROXY non impostati)');
-}
-
-function isRetryableError(err: any): boolean {
-  const code = err?.code || '';
-  const status = err?.response?.status || 0;
-  const msg = String(err?.message || '');
-  return status === 403 || status === 503 || status >= 500
-    || /ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENETUNREACH|ENOTFOUND|abort|timeout|socket hang up/i.test(code + msg);
-}
-
 /**
- * axios GET con retry proxy: tenta prima DIRETTO (3s timeout), poi con proxy se fallisce.
+ * axios GET diretto.
  */
 async function auAxiosGet(url: string, config: any = {}): Promise<any> {
-  // Tentativo diretto
-  console.log(`[AnimeUnity][Proxy] GET diretto (${DIRECT_TIMEOUT}ms) -> ${url}`);
-  try {
-    const resp = await axios.get(url, { ...config, timeout: DIRECT_TIMEOUT, httpAgent: undefined, httpsAgent: undefined });
-    console.log(`[AnimeUnity][Proxy] GET diretto OK (${resp.status}) <- ${url}`);
-    return resp;
-  } catch (directErr: any) {
-    const directMsg = directErr?.message || String(directErr);
-    console.warn(`[AnimeUnity][Proxy] GET diretto FALLITO: ${directMsg} <- ${url}`);
-    if (!proxyAgent) {
-      console.warn('[AnimeUnity][Proxy] Nessun proxy configurato, errore definitivo');
-      throw directErr;
-    }
-    if (!isRetryableError(directErr)) {
-      console.warn('[AnimeUnity][Proxy] Errore non retryable, non riprovo con proxy');
-      throw directErr;
-    }
-  }
-  // Retry con proxy
-  console.log(`[AnimeUnity][Proxy] Retry GET con proxy (${PROXY_TYPE}) -> ${url}`);
-  try {
-    const resp = await axios.get(url, { ...config, timeout: config.timeout || FETCH_TIMEOUT, httpAgent: proxyAgent, httpsAgent: proxyAgent });
-    console.log(`[AnimeUnity][Proxy] GET con proxy OK (${resp.status}) <- ${url}`);
-    return resp;
-  } catch (proxyErr: any) {
-    console.error(`[AnimeUnity][Proxy] GET FALLITO anche con proxy: ${proxyErr?.message || proxyErr} <- ${url}`);
-    throw proxyErr;
-  }
+  return axios.get(url, { ...config, timeout: config.timeout || FETCH_TIMEOUT });
 }
 
 /**
- * axios POST con retry proxy: tenta prima DIRETTO (3s timeout), poi con proxy se fallisce.
+ * axios POST diretto.
  */
 async function auAxiosPost(url: string, data: any, config: any = {}): Promise<any> {
-  console.log(`[AnimeUnity][Proxy] POST diretto (${DIRECT_TIMEOUT}ms) -> ${url}`);
-  try {
-    const resp = await axios.post(url, data, { ...config, timeout: DIRECT_TIMEOUT, httpAgent: undefined, httpsAgent: undefined });
-    console.log(`[AnimeUnity][Proxy] POST diretto OK (${resp.status}) <- ${url}`);
-    return resp;
-  } catch (directErr: any) {
-    const directMsg = directErr?.message || String(directErr);
-    console.warn(`[AnimeUnity][Proxy] POST diretto FALLITO: ${directMsg} <- ${url}`);
-    if (!proxyAgent) {
-      console.warn('[AnimeUnity][Proxy] Nessun proxy configurato, errore definitivo');
-      throw directErr;
-    }
-    if (!isRetryableError(directErr)) {
-      console.warn('[AnimeUnity][Proxy] Errore non retryable, non riprovo con proxy');
-      throw directErr;
-    }
-  }
-  console.log(`[AnimeUnity][Proxy] Retry POST con proxy (${PROXY_TYPE}) -> ${url}`);
-  try {
-    const resp = await axios.post(url, data, { ...config, timeout: config.timeout || FETCH_TIMEOUT, httpAgent: proxyAgent, httpsAgent: proxyAgent });
-    console.log(`[AnimeUnity][Proxy] POST con proxy OK (${resp.status}) <- ${url}`);
-    return resp;
-  } catch (proxyErr: any) {
-    console.error(`[AnimeUnity][Proxy] POST FALLITO anche con proxy: ${proxyErr?.message || proxyErr} <- ${url}`);
-    throw proxyErr;
-  }
+  return axios.post(url, data, { ...config, timeout: config.timeout || FETCH_TIMEOUT });
 }
 
 /**
- * fetchResource wrapper con retry proxy: tenta prima DIRETTO (3s, agent: null),
- * poi con proxy agent se fallisce.
+ * fetchResource wrapper diretto.
  */
 async function auFetchResource(url: string, providerCaches: any, options: any = {}): Promise<any> {
-  console.log(`[AnimeUnity][Proxy] fetchResource diretto (${DIRECT_TIMEOUT}ms) -> ${url}`);
-  try {
-    const result = await fetchResource(url, providerCaches, {
-      ...options,
-      agent: null,  // forza nessun proxy (override auto-detect in fetch-resource.ts)
-      timeoutMs: DIRECT_TIMEOUT,
-    });
-    console.log(`[AnimeUnity][Proxy] fetchResource diretto OK <- ${url}`);
-    return result;
-  } catch (directErr: any) {
-    const directMsg = directErr?.message || String(directErr);
-    console.warn(`[AnimeUnity][Proxy] fetchResource diretto FALLITO: ${directMsg} <- ${url}`);
-    if (!proxyAgent) {
-      console.warn('[AnimeUnity][Proxy] Nessun proxy per fetchResource, errore definitivo');
-      throw directErr;
-    }
-  }
-  console.log(`[AnimeUnity][Proxy] Retry fetchResource con proxy (${PROXY_TYPE}) -> ${url}`);
-  try {
-    const result = await fetchResource(url, providerCaches, {
-      ...options,
-      agent: proxyAgent,
-      timeoutMs: options.timeoutMs || FETCH_TIMEOUT,
-    });
-    console.log(`[AnimeUnity][Proxy] fetchResource con proxy OK <- ${url}`);
-    return result;
-  } catch (proxyErr: any) {
-    console.error(`[AnimeUnity][Proxy] fetchResource FALLITO anche con proxy: ${proxyErr?.message || proxyErr} <- ${url}`);
-    throw proxyErr;
-  }
+  return fetchResource(url, providerCaches, {
+    ...options,
+    agent: null, // forza nessun proxy
+    timeoutMs: options.timeoutMs || FETCH_TIMEOUT,
+  });
 }
 
 interface AnimeUnitySession {
@@ -691,7 +578,6 @@ function normalizeTitleForSearch(title: string): string {
 }
 
 export class AnimeUnityProvider {
-  private kitsuProvider = new KitsuProvider();
 
   constructor(private config: AnimeUnityConfig) { }
 
@@ -774,10 +660,14 @@ export class AnimeUnityProvider {
     const streams: StreamForStremio[] = [];
     const seenLinks = new Set<string>();
 
-    const sNum = seasonNumber || 1;
-    let baseTitle = `${capitalize(displayTitle)} ▪ ${langLabel} ▪ S${sNum}`;
-    const resolvedEpisodeNum = parsePositiveInt(selected.num) || requestedEpisode;
-    if (resolvedEpisodeNum) baseTitle += `E${resolvedEpisodeNum}`;
+    const cleanTitle = capitalize(displayTitle);
+    let baseTitle = `${cleanTitle}\n${langLabel.toUpperCase()}`;
+    if (!isMovie) {
+      const sNum = seasonNumber || 1;
+      const resolvedEpisodeNum = parsePositiveInt(selected.num) || requestedEpisode;
+      baseTitle += ` - S${sNum}`;
+      if (resolvedEpisodeNum) baseTitle += `E${resolvedEpisodeNum}`;
+    }
 
     const preferMp4 = /^(1|true|on)$/i.test(String(process.env.ANIMEUNITY_PREFER_MP4 || '0'));
     let added = false;
@@ -787,77 +677,18 @@ export class AnimeUnityProvider {
       try {
         const hlsRes = await extractFromUrl(streamResult.embed_url, {
           referer: streamResult.episode_page || animeUrl,
-          mfpUrl: this.config.mfpUrl,
-          mfpPassword: this.config.mfpPassword,
-          titleHint: baseTitle,
+          titleHint: baseTitle
         });
         if (hlsRes.streams && hlsRes.streams.length) {
           for (const st of hlsRes.streams) {
             if (!st || !st.url) continue;
             if (seenLinks.has(st.url)) continue;
-            streams.push(st as StreamForStremio);
+            streams.push({
+                ...st,
+                name: providerLabel('animeunity', (st as any).isSyntheticFhd)
+            } as StreamForStremio);
             seenLinks.add(st.url);
             added = true;
-
-            try {
-              const masterUrl = st.url;
-              const respPl = await fetch(masterUrl, { headers: (st as any)?.behaviorHints?.requestHeaders || {} });
-              if (respPl.ok) {
-                const playlistText = await respPl.text();
-                if (/EXT-X-STREAM-INF/i.test(playlistText)) {
-                  interface VariantEntry { line: string; url: string; height: number; bandwidth?: number; }
-                  const lines = playlistText.split(/\r?\n/);
-                  const variants: VariantEntry[] = [];
-                  for (let i = 0; i < lines.length; i += 1) {
-                    const line = lines[i];
-                    if (/^#EXT-X-STREAM-INF:/i.test(line)) {
-                      const nextUrl = lines[i + 1] || '';
-                      if (nextUrl.startsWith('#') || !nextUrl.trim()) continue;
-                      let height = 0;
-                      const resMatch = line.match(/RESOLUTION=\d+x(\d+)/i);
-                      if (resMatch) height = parseInt(resMatch[1], 10);
-                      const bwMatch = line.match(/BANDWIDTH=(\d+)/i);
-                      const bw = bwMatch ? parseInt(bwMatch[1], 10) : undefined;
-                      variants.push({ line, url: nextUrl.trim(), height, bandwidth: bw });
-                    }
-                  }
-                  if (variants.length) {
-                    variants.sort((a, b) => (b.height - a.height) || ((b.bandwidth || 0) - (a.bandwidth || 0)));
-                    const best = variants[0];
-                    let variantUrl = best.url;
-                    if (!/^https?:\/\//i.test(variantUrl)) {
-                      try {
-                        variantUrl = new URL(variantUrl, masterUrl).toString();
-                      } catch {
-                        // keep as is
-                      }
-                    }
-                    variantUrl = variantUrl.replace(/(\/playlist\/(\d+))(?!\.m3u8)(?=[^\w]|$)/, '$1.m3u8');
-                    if (!seenLinks.has(variantUrl)) {
-                      const markAsFhd = best.height >= 720;
-                      const behaviorHints: any = {
-                        ...((st as any).behaviorHints || {}),
-                        animeunityQuality: markAsFhd ? 'FHD' : 'HQ',
-                        animeunityResolution: best.height,
-                        animeunityNameSuffix: markAsFhd ? ' 🅵🅷🅳' : '',
-                      };
-                      if ((st as any)?.behaviorHints?.requestHeaders) {
-                        behaviorHints.requestHeaders = (st as any).behaviorHints.requestHeaders;
-                      }
-                      streams.push({
-                        title: (st as any).title,
-                        url: variantUrl,
-                        behaviorHints,
-                        isSyntheticFhd: markAsFhd,
-                      });
-                      seenLinks.add(variantUrl);
-                    }
-                  }
-                }
-              }
-            } catch (fhde: any) {
-              console.warn('[AnimeUnity][FHDVariant] errore generazione variante FHD:', fhde?.message || fhde);
-            }
           }
         }
       } catch (error: any) {
@@ -871,18 +702,14 @@ export class AnimeUnityProvider {
       }
     }
 
-    const mfpConfigured = !!this.config.mfpUrl;
+    const mfpConfigured = false;
     const allowMp4 = preferMp4 || (hls403 && !added);
     if (allowMp4 && streamResult.mp4_url) {
       if (!preferMp4 && hls403 && !mfpConfigured) {
         console.log('[AnimeUnity] MP4 non mostrato: HLS 403 ma MFP non configurato');
       } else {
         try {
-          const mediaFlowUrl = formatMediaFlowUrl(
-            streamResult.mp4_url,
-            this.config.mfpUrl,
-            this.config.mfpPassword
-          );
+          const mediaFlowUrl = streamResult.mp4_url;
           if (!seenLinks.has(mediaFlowUrl)) {
             streams.push({
               title: baseTitle + (added ? ' (MP4)' : (preferMp4 ? ' (MP4 Preferred)' : ' (MP4 Fallback)')),
@@ -897,49 +724,7 @@ export class AnimeUnityProvider {
       }
     }
 
-    // --- Nuova logica 3 modalità (come StreamingCommunity) ---
-    // animeunityDirect    = Direct (solo locale, IP-bound)
-    // animeunityDirectFhd = Synthetic FHD (solo locale, IP-bound)
-    // animeunityProxy     = Proxy (cross-IP, tutto via EasyProxy)
-    // Default (nessuna selezione) = Proxy se MFP presente, altrimenti Direct
-    const wantsDirect = this.config.animeunityDirect === true;
-    const wantsDirectFhd = this.config.animeunityDirectFhd === true;
-    const wantsProxy = this.config.animeunityProxy === true;
-    const noneSelected = !wantsDirect && !wantsDirectFhd && !wantsProxy;
-    const directWanted = noneSelected ? !this.config.mfpUrl : wantsDirect;
-    const directFhdWanted = noneSelected ? false : wantsDirectFhd;
-    const proxyWanted = noneSelected ? !!this.config.mfpUrl : wantsProxy;
-
-    // Genera versione Proxy cross-IP via EasyProxy generic HLS proxy.
-    const mfpWrapped: StreamForStremio[] = [];
-    if (proxyWanted && this.config.mfpUrl && streamResult.embed_url) {
-      const cleanMfp = this.config.mfpUrl.endsWith('/') ? this.config.mfpUrl.slice(0, -1) : this.config.mfpUrl;
-      const pwdParam = this.config.mfpPassword ? `&api_password=${encodeURIComponent(this.config.mfpPassword)}` : '';
-
-      try {
-        const embedReferer = streamResult.episode_page || animeUrl || 'https://animeunity.so/';
-        const proxyPlaylistUrl = `${cleanMfp}/proxy/hls/manifest.m3u8?d=${encodeURIComponent(streamResult.embed_url)}${pwdParam}`
-          + `&h_Origin=${encodeURIComponent('https://vixcloud.co')}`
-          + `&h_Referer=${encodeURIComponent(embedReferer)}`;
-        console.log('[AnimeUnity][MFP] Built generic proxy URL:', proxyPlaylistUrl);
-
-        mfpWrapped.push({
-          title: baseTitle + ' 🔒',
-          url: proxyPlaylistUrl,
-          behaviorHints: { notWebReady: true, animeunityMfpWrapped: true },
-        });
-      } catch (e: any) {
-        console.warn('[AnimeUnity][MFP] Errore costruzione proxy URL:', e?.message || e);
-      }
-    }
-
-    // Stream diretti: solo se Direct o Synthetic FHD richiesti
-    const directOut: StreamForStremio[] = [];
-    if (directWanted || directFhdWanted) {
-      directOut.push(...streams);
-    }
-
-    return [...directOut, ...mfpWrapped];
+    return streams;
   }
 
   private async getStreamsFromMapping(
@@ -1065,7 +850,22 @@ export class AnimeUnityProvider {
       return { streams: [] };
     }
     try {
-      const { kitsuId, seasonNumber, episodeNumber, isMovie } = this.kitsuProvider.parseKitsuId(kitsuIdString);
+      const parts = kitsuIdString.split(':');
+      const kitsuId = parts[1];
+      let seasonNumber: number | null = null;
+      let episodeNumber: number | null = null;
+      let isMovie = false;
+      if (parts.length === 2) {
+        isMovie = true;
+        seasonNumber = 1;
+        episodeNumber = 1;
+      } else if (parts.length === 3) {
+        episodeNumber = parseInt(parts[2], 10);
+        seasonNumber = 1;
+      } else if (parts.length === 4) {
+        seasonNumber = parseInt(parts[2], 10);
+        episodeNumber = parseInt(parts[3], 10);
+      }
       // Single quick Kitsu call for canonical title (stream label only)
       // Heavy resolution (mappings, include=mappings, Jikan) deferred to fallback path only
       let quickTitle = kitsuId;
@@ -1207,6 +1007,16 @@ export class AnimeUnityProvider {
       console.log(`[AnimeUnity][ExactMap] Skip filtro: titolo di input corrisponde a chiave exactMap -> "${title}"`);
     }
     let animeVersions = await this.searchAllVersions(normalizedTitle);
+    // Filtro duplicati esplicito prima di lanciare le estrazioni
+    const uniqueVersions = [];
+    const seenSlugs = new Set();
+    for (const v of animeVersions) {
+      const key = `${v.version.id}-${v.language_type}`;
+      if (seenSlugs.has(key)) continue;
+      seenSlugs.add(key);
+      uniqueVersions.push(v);
+    }
+    animeVersions = uniqueVersions;
     // Fallback: se non trova nulla, prova anche con titoli alternativi
     if (!animeVersions.length) {
       // Prova a ottenere titoli alternativi da Jikan (se hai il MAL ID)
@@ -1295,9 +1105,8 @@ export class AnimeUnityProvider {
       console.warn('[AnimeUnity] Nessun risultato trovato per il titolo:', normalizedTitle);
       return { streams: [] };
     }
-    const streams: StreamForStremio[] = [];
     const seenLinks = new Set();
-    for (const { version, language_type } of animeVersions) {
+    const versionResults = await Promise.all(animeVersions.map(async ({ version, language_type }) => {
       const cleanName = version.name
         .replace(/\s*\(ITA\)/i, '')
         .replace(/\s*\(CR\)/i, '')
@@ -1306,15 +1115,19 @@ export class AnimeUnityProvider {
         .trim();
       const langLabel = language_type === 'ITA' ? 'ITA' : 'SUB';
       const path = normalizeAnimePath(`/anime/${version.id}-${version.slug}`);
-      if (!path) continue;
-      const perVersion = await this.extractStreamsFromAnimePath(
+      if (!path) return [];
+      return this.extractStreamsFromAnimePath(
         path,
         episodeNumber,
         seasonNumber,
         isMovie,
-        cleanName,
+        undefined, // Pass undefined instead of cleanName for mapping fallback
         langLabel
       );
+    }));
+
+    const streams: StreamForStremio[] = [];
+    for (const perVersion of versionResults) {
       for (const st of perVersion) {
         if (!st || !st.url) continue;
         if (seenLinks.has(st.url)) continue;

@@ -1,5 +1,4 @@
 import * as cheerio from 'cheerio';
-import { KitsuProvider } from './kitsu';
 import { getDomain } from '../utils/domains';
 // import { formatMediaFlowUrl } from '../utils/mediaflow'; // disabilitato: usiamo URL mp4 diretto
 import { AnimeWorldConfig, AnimeWorldResult, AnimeWorldEpisode, StreamForStremio } from '../types/animeunity';
@@ -562,7 +561,6 @@ function scoreOriginalMatch(slug: string, normKey: string): number {
 }
 
 export class AnimeWorldProvider {
-  private kitsuProvider = new KitsuProvider();
   constructor(private config: AnimeWorldConfig) {}
 
   private playLangCache = new Map<string,'ITA'|'SUB ITA'>();
@@ -892,10 +890,13 @@ export class AnimeWorldProvider {
       const slugBase = slug.split('.')[0] || '';
       if (/[-_]ita$/i.test(slugBase)) langLabel = 'ITA';
     }
-    const sNum = seasonNumber || 1;
     const epNum = isMovie ? Number(target.number || 1) : requestedEpisode;
-    let titleStream = `${capitalize(cleanName || titleFallback)} ▪ ${langLabel} ▪ S${sNum}`;
-    if (!isMovie && epNum) titleStream += `E${epNum}`;
+    let titleStream = `${capitalize(cleanName || titleFallback)}\n${langLabel.toUpperCase()}`;
+    if (!isMovie) {
+      const sNum = seasonNumber || 1;
+      titleStream += ` - S${sNum}`;
+      if (epNum) titleStream += `E${epNum}`;
+    }
 
     return [{ title: titleStream, url: mp4, behaviorHints: { notWebReady: true } }];
   }
@@ -944,11 +945,14 @@ export class AnimeWorldProvider {
     if (!animePaths.length) return [];
     const requestedEpisode = resolveEpisodeFromMappingPayload(mappingPayload, lookup.episode);
 
+    const pathResults = await Promise.all(animePaths.map(path =>
+      this.extractStreamsFromMappedPath(path, requestedEpisode, seasonNumber, isMovie, '')
+    ));
+
     const merged: StreamForStremio[] = [];
     const seen = new Set<string>();
-    for (const path of animePaths) {
-      const got = await this.extractStreamsFromMappedPath(path, requestedEpisode, seasonNumber, isMovie, titleFallback);
-      for (const stream of got) {
+    for (const perPath of pathResults) {
+      for (const stream of perPath) {
         const key = String(stream.url || '').trim();
         if (!key || seen.has(key)) continue;
         seen.add(key);
@@ -985,7 +989,22 @@ export class AnimeWorldProvider {
   async handleKitsuRequest(kitsuIdString: string): Promise<{ streams: StreamForStremio[] }> {
     if (!this.config.enabled) return { streams: [] };
     try {
-      const { kitsuId, seasonNumber, episodeNumber, isMovie } = this.kitsuProvider.parseKitsuId(kitsuIdString);
+      const parts = kitsuIdString.split(':');
+      const kitsuId = parts[1];
+      let seasonNumber: number | null = null;
+      let episodeNumber: number | null = null;
+      let isMovie = false;
+      if (parts.length === 2) {
+        isMovie = true;
+        seasonNumber = 1;
+        episodeNumber = 1;
+      } else if (parts.length === 3) {
+        episodeNumber = parseInt(parts[2], 10);
+        seasonNumber = 1;
+      } else if (parts.length === 4) {
+        seasonNumber = parseInt(parts[2], 10);
+        episodeNumber = parseInt(parts[3], 10);
+      }
       // Single quick Kitsu call: canonical title (for stream label) + startDate (for fallback filter-year)
       // Heavy resolution (mappings, include=mappings, Jikan) deferred to fallback path only
       let quickTitle = kitsuId;
@@ -1044,17 +1063,25 @@ export class AnimeWorldProvider {
   // Removed placeholder injection; icon added directly to titles
       }
   const imdbIdClean = imdbId.split(':')[0];
-  // Try mapping API first — defer expensive title resolution to fallback path only
+
+  // Resolve English title first for mapping fallback
+  let englishTitle = '';
+  try {
+    englishTitle = await getEnglishTitleFromAnyId(imdbId, 'imdb', this.config.tmdbApiKey);
+  } catch (err) {
+    console.warn('[AnimeWorld] Error resolving english title for mapping fallback:', err);
+  }
+
+  // Try mapping API with resolved title
   const fromMappingImdb = await this.getStreamsFromMapping(
-    imdbIdClean, seasonNumber, episodeNumber, isMovie, { imdbId: imdbIdClean }, ''
+    imdbIdClean, seasonNumber, episodeNumber, isMovie, { imdbId: imdbIdClean }, englishTitle
   );
   if (fromMappingImdb.length) {
     console.log('[AnimeWorld] Mapping hit (IMDB): skipped title resolution.');
     return { streams: fromMappingImdb };
   }
-  // Mapping miss → resolve full English title for title search fallback
+  // Mapping miss -> use already resolved englishTitle for search fallback
   console.log('[AnimeWorld] Mapping miss (IMDB): fallback a ricerca per titolo per', imdbIdClean);
-  const englishTitle = await getEnglishTitleFromAnyId(imdbId, 'imdb', this.config.tmdbApiKey);
   const res = await this.handleTitleRequest(englishTitle, seasonNumber, episodeNumber, isMovie);
   return res;
     } catch(e){ console.error('[AnimeWorld] imdb handler error', e); return { streams: [] }; }
@@ -1071,17 +1098,25 @@ export class AnimeWorldProvider {
         }
   // Removed placeholder injection; icon added directly to titles
       }
-  // Try mapping API first — defer expensive title resolution to fallback path only
+
+  // Resolve English title first for mapping fallback
+  let englishTitle = '';
+  try {
+    englishTitle = await getEnglishTitleFromAnyId(tmdbId, 'tmdb', this.config.tmdbApiKey);
+  } catch (err) {
+    console.warn('[AnimeWorld] Error resolving english title for mapping fallback:', err);
+  }
+
+  // Try mapping API with resolved title
   const fromMappingTmdb = await this.getStreamsFromMapping(
-    tmdbId, seasonNumber, episodeNumber, isMovie, { tmdbId }, ''
+    tmdbId, seasonNumber, episodeNumber, isMovie, { tmdbId }, englishTitle
   );
   if (fromMappingTmdb.length) {
     console.log('[AnimeWorld] Mapping hit (TMDB): skipped title resolution.');
     return { streams: fromMappingTmdb };
   }
-  // Mapping miss → resolve full English title for title search fallback
+  // Mapping miss -> use already resolved englishTitle for search fallback
   console.log('[AnimeWorld] Mapping miss (TMDB): fallback a ricerca per titolo per TMDB', tmdbId);
-  const englishTitle = await getEnglishTitleFromAnyId(tmdbId, 'tmdb', this.config.tmdbApiKey);
   const res = await this.handleTitleRequest(englishTitle, seasonNumber, episodeNumber, isMovie);
   return res;
     } catch(e){ console.error('[AnimeWorld] tmdb handler error', e); return { streams: [] }; }
@@ -1325,14 +1360,17 @@ export class AnimeWorldProvider {
           baseName = fromSlug;
         }
 
-        const sNum = seasonNumber || 1;
         let langLabel = 'SUB';
         if (v.language_type === 'ITA') langLabel = 'ITA';
         else if (v.language_type === 'SUB ITA') langLabel = 'SUB';
         else if (v.language_type === 'CR ITA') langLabel = 'CR';
 
-        let titleStream = `${capitalize(baseName)} ▪ ${langLabel} ▪ S${sNum}`;
-        if (episodeNumber) titleStream += `E${episodeNumber}`;
+        let titleStream = `${capitalize(baseName)}\n${langLabel}`;
+        if (!isMovie) {
+          const sNum = seasonNumber || 1;
+          titleStream += ` - S${sNum}`;
+          if (episodeNumber) titleStream += `E${episodeNumber}`;
+        }
 
         return { title: titleStream, url: finalUrl } as StreamForStremio;
       } catch (e) {
@@ -1396,11 +1434,16 @@ export class AnimeWorldProvider {
           const mp4 = streamData?.mp4_url;
           if (!mp4) continue;
           const lang = idx === 0 ? 'Original' : 'Italian';
-          const sNum = seasonNumber || 1;
           let baseName = (r.name || slug || normalizedTitle).toString().trim();
           if (baseName.includes('\n')) baseName = baseName.replace(/\s+/g,' ').trim();
-          let titleStream = `${baseName} ▪ ${lang === 'Original' ? 'SUB' : 'ITA'} ▪ S${sNum}`;
-          if (episodeNumber) titleStream += `E${episodeNumber}`;
+
+          const langLabel = lang === 'Original' ? 'SUB' : 'ITA';
+          let titleStream = `${capitalize(baseName)}\n${langLabel}`;
+          if (!isMovie) {
+            const sNum = seasonNumber || 1;
+            titleStream += ` - S${sNum}`;
+            if (episodeNumber) titleStream += `E${episodeNumber}`;
+          }
           streams.push({ title: titleStream, url: mp4, behaviorHints: { bingeGroup: 'animeworld-fallback' } });
           idx++;
         } catch (e) {

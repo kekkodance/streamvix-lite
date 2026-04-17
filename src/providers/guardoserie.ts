@@ -1,4 +1,3 @@
-
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { wrapper } from 'axios-cookiejar-support';
@@ -59,7 +58,7 @@ async function fetchWithBypass(url: string, options: any = {}): Promise<any> {
         // 1. Try direct fetch (Fastest)
         return await getClient().get(url, { 
             ...options, 
-            timeout: 1000 
+            timeout: 5000 
         });
     } catch (e: any) {
         if (e.response?.status === 403 || e.response?.status === 400 || !e.response || e.code === 'ECONNABORTED' || e.message === 'timeout exceeded') {
@@ -369,6 +368,8 @@ async function resolvePageStream(pageUrl: string, mfpUrl?: string, mfpPsw?: stri
         });
 
         const tabDivs = $('#player2 > div[id^="tab"]');
+        const extractionPromises: Promise<Stream | null>[] = [];
+
         for (const tabDiv of tabDivs) {
             const tabId = $(tabDiv).attr('id') || '';
             const lang = tabLangMap[tabId] || 'ITA';
@@ -379,24 +380,32 @@ async function resolvePageStream(pageUrl: string, mfpUrl?: string, mfpPsw?: stri
                 if (src) {
                     if (src.startsWith('//')) src = 'https:' + src;
                     if (src.includes('loadm')) {
-                        const stream = await extractLoadM(src, pageUrl, mfpUrl, mfpPsw, isSub);
-                        if (stream) streams.push(stream);
+                        extractionPromises.push(extractLoadM(src, pageUrl, mfpUrl, mfpPsw, isSub));
                     }
                 }
             }
         }
 
+        const results = await Promise.all(extractionPromises);
+        for (const s of results) {
+            if (s) streams.push(s);
+        }
+
         if (streams.length === 0) {
+            const fallbackPromises: Promise<Stream | null>[] = [];
             const iframes = $('iframe');
             for (const iframe of iframes) {
                 let src = $(iframe).attr('data-src') || $(iframe).attr('src');
                 if (src) {
                     if (src.startsWith('//')) src = 'https:' + src;
                     if (src.includes('loadm')) {
-                        const stream = await extractLoadM(src, pageUrl, mfpUrl, mfpPsw, false);
-                        if (stream) streams.push(stream);
+                        fallbackPromises.push(extractLoadM(src, pageUrl, mfpUrl, mfpPsw, false));
                     }
                 }
+            }
+            const fallbackResults = await Promise.all(fallbackPromises);
+            for (const s of fallbackResults) {
+                if (s) streams.push(s);
             }
         }
     } catch (e) {
@@ -405,21 +414,48 @@ async function resolvePageStream(pageUrl: string, mfpUrl?: string, mfpPsw?: stri
     return streams;
 }
 
+interface CacheEntry<T> {
+    value: T;
+    expiresAt: number;
+}
+
+const TMDB_TITLE_CACHE = new Map<string, CacheEntry<{ name: string, year: string } | null>>();
+const TMDB_TITLE_CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
+const TMDB_TITLE_CACHE_MAX_SIZE = 10000;
+
 async function getTmdbTitle(type: string, imdbId: string, tmdbApiKey?: string): Promise<{ name: string, year: string } | null> {
+    const imdbIdOnly = imdbId.split(':')[0];
+    const cacheKey = `${type}:${imdbIdOnly}`;
+    
+    const cached = TMDB_TITLE_CACHE.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+        return cached.value;
+    }
+
     try {
         const apiKey = tmdbApiKey || '40a9faa1f6741afb2c0c40238d85f8d0';
-        const url = `https://api.themoviedb.org/3/find/${imdbId}?api_key=${apiKey}&external_source=imdb_id&language=it-IT`;
+        const url = `https://api.themoviedb.org/3/find/${imdbIdOnly}?api_key=${apiKey}&external_source=imdb_id&language=it-IT`;
         const res = await axios.get(url, { timeout: 5000 });
         const results = type === 'series' ? res.data.tv_results : res.data.movie_results;
+        
+        let result: { name: string, year: string } | null = null;
         if (results && results.length > 0) {
             const data = results[0];
-            return {
+            result = {
                 name: data.title || data.name || data.original_title || data.original_name,
                 year: (data.release_date || data.first_air_date || '').split('-')[0]
             };
         }
-    } catch (e) {}
-    return null;
+
+        if (TMDB_TITLE_CACHE.size >= TMDB_TITLE_CACHE_MAX_SIZE) {
+            const firstKey = TMDB_TITLE_CACHE.keys().next().value;
+            if (firstKey !== undefined) TMDB_TITLE_CACHE.delete(firstKey);
+        }
+        TMDB_TITLE_CACHE.set(cacheKey, { value: result, expiresAt: Date.now() + TMDB_TITLE_CACHE_TTL });
+        return result;
+    } catch (e) {
+        return null;
+    }
 }
 
 async function getCinemetaMeta(type: string, imdbId: string): Promise<{ name: string, year: string } | null> {

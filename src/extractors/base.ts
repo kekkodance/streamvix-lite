@@ -6,8 +6,6 @@ import type { StreamForStremio } from '../types/animeunity';
 
 export interface ExtractorContext {
   referer?: string;
-  mfpUrl?: string;
-  mfpPassword?: string;
   countryCode?: string; // e.g. 'IT'
   titleHint?: string; // Italian localized title to force line1
 }

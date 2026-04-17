@@ -24,40 +24,36 @@ export function formatBytesHuman(b?: number): string {
 }
 
 export function providerLabel(provider: string, isFhd?: boolean): string {
-  switch (provider) {
-    case 'vixsrc': return `🤌 StreamingCommunity 🍿${isFhd ? ' 🅵🅷🅳' : ''}`;
-    case 'animeunity': return `🤌 Anime Unity ⛩️${isFhd ? ' 🅵🅷🅳' : ''}`; // Added dynamic FHD marker
-    case 'animesaturn': return '🤌 Anime Saturn 🪐';
-    case 'animeworld': return '🤌 Anime World 🌍';
-    case 'guardaserie': return '🤌 GuardaSerie 🎥';
-    case 'guardoserie': return '🤌 Guardoserie 📼';
-    case 'guardaflix': return '🤌 Guardaflix 📼';
-    case 'guardahd': return '🤌 GuardaHD 🎬';
-    case 'cb01': return '🤌 CB01 🎞️';
-    case 'eurostreaming': return '🤌 Eurostreaming 🇪🇺';
-    case 'loonex': return '🤌 Loonex 🎬';
-    case 'toonitalia': return '🤌 ToonItalia 🎨';
-    default: return provider;
-  }
+  let label = provider;
+  if (provider === 'vixsrc') label = 'StreamingCommunity';
+  if (provider === 'animeunity') label = 'AnimeUnity';
+  if (provider === 'animesaturn') label = 'AnimeSaturn';
+  if (provider === 'animeworld') label = 'AnimeWorld';
+  if (provider === 'guardoserie') label = 'GuardoSerie';
+  if (provider === 'guardaflix') label = 'Guardaflix';
+  
+  return isFhd ? `${label} FHD` : label;
 }
 
 export function buildUnifiedStreamName(opts: UnifiedNameOptions): string {
   const lines: string[] = [];
-  lines.push(`🎬 ${opts.baseTitle}`);
+  lines.push(opts.baseTitle);
   // Language line: use explicit langFlag if provided, otherwise legacy isSub logic
   if (opts.langFlag) {
-    lines.push(`🗣 ${opts.langFlag}`);
+    lines.push(opts.langFlag);
   } else {
-    lines.push(`🗣 ${opts.isSub ? '[SUB]' : '[ITA]'}`);
+    lines.push(opts.isSub ? 'SUB' : 'ITA');
   }
   if (opts.sizeBytes) {
     const sz = formatBytesHuman(opts.sizeBytes);
-    if (sz) lines.push(`💾 ${sz}`);
+    if (sz) lines.push(sz);
   }
-  if (opts.playerName) lines.push(`▶️ ${opts.playerName}`);
-  lines.push(`🌐 Proxy (${opts.proxyOn ? 'ON' : 'OFF'})`);
+  if (opts.playerName) lines.push(opts.playerName);
+  
   if (!opts.hideProviderInTitle) {
     lines.push(providerLabel(opts.provider, opts.isFhdOrDual));
+  } else if (opts.isFhdOrDual) {
+    lines.push('1080p');
   }
   return lines.join('\n');
 }
@@ -66,26 +62,21 @@ export function buildUnifiedStreamName(opts: UnifiedNameOptions): string {
 export function langToFlag(langs: string[]): string {
   const hasIt = langs.some(l => l === 'it' || l === 'ita' || l.startsWith('it'));
   const hasEn = langs.some(l => l === 'en' || l === 'eng' || l.startsWith('en'));
-  if (hasIt && hasEn) return '🇮🇹 🇬🇧';
-  if (hasIt) return '🇮🇹';
-  if (hasEn) return '🇬🇧';
-  if (langs.length > 0) return `🌐 ${langs[0].toUpperCase()}`;
-  return '🇮🇹'; // fallback default
+  if (hasIt && hasEn) return 'ITA ENG';
+  if (hasIt) return 'ITA';
+  if (hasEn) return 'ENG';
+  if (langs.length > 0) return langs[0].toUpperCase();
+  return 'ITA'; // fallback default
 }
 
 // Simple legacy name mapping helper for transitional phase
-// Converts legacy addon.ts provider name strings (e.g. 'StreamViX AU') into new label.
+// Converts legacy addon.ts provider name strings (e.g. 'streamvix-lite AU') into new label.
 export function mapLegacyProviderName(legacy: string): string {
   const lower = legacy.toLowerCase();
   if (lower.includes('streamvix vx')) return providerLabel('vixsrc');
   if (lower.includes('streamvix au')) return providerLabel('animeunity');
   if (lower.includes('streamvix as')) return providerLabel('animesaturn');
   if (lower.includes('streamvix aw')) return providerLabel('animeworld');
-  if (lower.includes('streamvix gs')) return providerLabel('guardaserie');
-  if (lower.includes('streamvix gh')) return providerLabel('guardahd');
-  if (lower.includes('streamvix cb')) return providerLabel('cb01');
-  if (lower.includes('streamvix es')) return providerLabel('eurostreaming');
-  if (lower.includes('loonex')) return providerLabel('loonex');
-  if (lower.includes('toonitalia')) return providerLabel('toonitalia');
+  if (lower.includes('streamvix gs')) return providerLabel('guardoserie');
   return legacy;
 }

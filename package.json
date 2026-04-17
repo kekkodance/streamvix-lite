@@ -18,7 +18,8 @@
     "socks-proxy-agent": "^8.0.5",
     "stremio-addon-sdk": "^1.6.10",
     "tough-cookie": "^4.1.4",
-    "undici": "^6.19.8"
+    "undici": "^6.19.8",
+    "unpacker": "^1.0.1"
   },
   "devDependencies": {
     "@types/axios": "^0.14.4",

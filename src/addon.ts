@@ -257,6 +257,27 @@ function createBuilder() {
 
 const app = express();
 app.set('trust proxy', true);
+
+// The Stremio SDK parses the config path segment as URL-encoded JSON. Older
+// landing pages generated base64 configs, so rewrite those paths to keep
+// already installed addon URLs working.
+app.use((req, _res, next) => {
+    const match = req.url.match(/^\/([A-Za-z0-9+=]{8,})(\/.*)?$/);
+    if (!match) return next();
+    const segment = match[1];
+    const rest = match[2] || '';
+    try {
+        const json = Buffer.from(segment, 'base64').toString('utf8');
+        if (!json.trim().startsWith('{')) return next();
+        const parsed = JSON.parse(json);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return next();
+        req.url = `/${encodeURIComponent(json)}${rest}`;
+    } catch {
+        // Not a base64 config segment.
+    }
+    next();
+});
+
 const builder = createBuilder();
 const addonInterface = builder.getInterface();
 const router = getRouter(addonInterface);

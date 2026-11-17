@@ -474,7 +474,7 @@ function landingTemplate(manifest: any) {
 				var updateLink = function() {
 					var config = buildConfigFromForm();
 					var configStr = JSON.stringify(config);
-					var encodedConfig = btoa(configStr);
+					var encodedConfig = encodeURIComponent(configStr);
 					installLink.setAttribute('href', 'stremio://' + window.location.host + '/' + encodedConfig + '/manifest.json');
 				};
 				(mainForm).onchange = updateLink;
@@ -506,7 +506,7 @@ function landingTemplate(manifest: any) {
 				if (mainForm) {
 					var config = window.buildConfigFromForm ? window.buildConfigFromForm() : {};
 					var configStr = JSON.stringify(config);
-					var encodedConfig = btoa(configStr);
+					var encodedConfig = encodeURIComponent(configStr);
 					manifestUrl = window.location.protocol + '//' + window.location.host + '/' + encodedConfig + '/manifest.json';
 				} else {
 					manifestUrl = window.location.protocol + '//' + window.location.host + '/manifest.json';
@@ -688,7 +688,7 @@ function landingTemplate(manifest: any) {
 
 				function showInstallPanel(config){
 					var configStr = JSON.stringify(config);
-					var encodedConfig = btoa(configStr);
+					var encodedConfig = encodeURIComponent(configStr);
 					var stremioUrl = 'stremio://' + window.location.host + '/' + encodedConfig + '/manifest.json';
 					var manifestUrl = window.location.protocol + '//' + window.location.host + '/' + encodedConfig + '/manifest.json';
 

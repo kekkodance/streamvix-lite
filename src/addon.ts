@@ -293,6 +293,139 @@ app.get('/abyss/:file', (req, res) => {
     void handleAbyssProxy(req, res);
 });
 
+// Rewrites the VixSrc master playlist to a single best video variant and the
+// requested audio track. Segments stay on the VixSrc CDN.
+app.get(['/vixsynthetic', '/vixsynthetic.m3u8'], async (req: Request, res: Response) => {
+    try {
+        const src = typeof req.query.src === 'string' ? req.query.src : '';
+        if (!src) return res.status(400).send('#EXTM3U\n# Missing src');
+
+        let parsed: URL;
+        try {
+            parsed = new URL(src);
+        } catch {
+            return res.status(400).send('#EXTM3U\n# Invalid src');
+        }
+        if (!/^https?:$/.test(parsed.protocol)) return res.status(400).send('#EXTM3U\n# Invalid src');
+        const host = parsed.hostname.toLowerCase();
+        const allowedHost = host === 'vixsrc.to' || host.endsWith('.vixsrc.to') || host === 'vixcloud.co' || host.endsWith('.vixcloud.co');
+        if (!allowedHost) return res.status(400).send('#EXTM3U\n# Unsupported src');
+
+        const langPref = String(req.query.lang || 'it').toLowerCase();
+        const multiFlag = ['1', 'true', 'on', 'yes', 'all'].includes(String(req.query.multi || '').toLowerCase())
+            || String(req.query.languages || '').toLowerCase() === 'all';
+
+        const upstream = await fetch(src, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
+                'Accept': 'application/vnd.apple.mpegurl, application/x-mpegURL, */*',
+                'Referer': 'https://vixsrc.to/',
+                'Origin': 'https://vixsrc.to'
+            },
+            signal: AbortSignal.timeout(15000)
+        });
+        if (!upstream.ok) return res.status(502).send('#EXTM3U\n# Upstream error');
+
+        const text = await upstream.text();
+        res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+        res.setHeader('Cache-Control', 'no-store');
+        if (!/#EXT-X-STREAM-INF:/i.test(text)) return res.send(text);
+
+        interface Variant { url: string; height: number; bandwidth: number; info: string; }
+        const variants: Variant[] = [];
+        const media: { line: string; attrs: Record<string, string> }[] = [];
+        const parseAttrs = (line: string): Record<string, string> => {
+            const attrs: Record<string, string> = {};
+            line.replace(/([A-Z0-9-]+)=(("[^"]+")|([^,]+))/g, (_match: string, key: string, value: string) => {
+                attrs[key] = String(value).replace(/^"|"$/g, '');
+                return '';
+            });
+            return attrs;
+        };
+
+        const lines = text.split(/\r?\n/);
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            if (line.startsWith('#EXT-X-MEDIA:')) {
+                media.push({ line, attrs: parseAttrs(line) });
+            }
+            if (line.startsWith('#EXT-X-STREAM-INF:')) {
+                const next = lines[i + 1] || '';
+                if (!next || next.startsWith('#')) continue;
+                const attrs = parseAttrs(line);
+                let height = 0;
+                let bandwidth = 0;
+                if (attrs['RESOLUTION']) {
+                    const match = attrs['RESOLUTION'].match(/(\d+)x(\d+)/);
+                    if (match) height = parseInt(match[2], 10) || 0;
+                }
+                if (attrs['BANDWIDTH']) bandwidth = parseInt(attrs['BANDWIDTH'], 10) || 0;
+                let variantUrl = next.trim();
+                try { variantUrl = new URL(variantUrl, src).toString(); } catch { }
+                variants.push({ url: variantUrl, height, bandwidth, info: line });
+            }
+        }
+        if (!variants.length) return res.send(text);
+
+        variants.sort((a, b) => (b.height - a.height) || (b.bandwidth - a.bandwidth));
+        const best = variants[0];
+        const header: string[] = ['#EXTM3U'];
+        for (const tag of ['#EXT-X-VERSION', '#EXT-X-INDEPENDENT-SEGMENTS']) {
+            if (text.includes(tag)) header.push(tag);
+        }
+
+        if (multiFlag) {
+            const audioGroups = new Set<string>();
+            for (const item of media) {
+                const type = (item.attrs['TYPE'] || '').toUpperCase();
+                if (type === 'AUDIO' || type === 'SUBTITLES') {
+                    header.push(item.line);
+                    if (type === 'AUDIO' && item.attrs['GROUP-ID']) audioGroups.add(item.attrs['GROUP-ID']);
+                }
+            }
+            let streamInfo = best.info;
+            const firstAudio = [...audioGroups][0];
+            if (firstAudio) {
+                if (/AUDIO="/.test(streamInfo)) streamInfo = streamInfo.replace(/AUDIO="[^"]+"/, `AUDIO="${firstAudio}"`);
+                else streamInfo = streamInfo.replace('#EXT-X-STREAM-INF:', `#EXT-X-STREAM-INF:AUDIO="${firstAudio}",`);
+            }
+            header.push(streamInfo, best.url);
+        } else {
+            let chosenGroup: string | null = null;
+            let chosenLine: string | null = null;
+            for (const item of media) {
+                if ((item.attrs['TYPE'] || '').toUpperCase() !== 'AUDIO') continue;
+                const lang = (item.attrs['LANGUAGE'] || '').toLowerCase();
+                const name = (item.attrs['NAME'] || '').toLowerCase();
+                if (lang === langPref || name.includes(langPref)) {
+                    chosenGroup = item.attrs['GROUP-ID'] || null;
+                    chosenLine = item.line;
+                    break;
+                }
+            }
+            if (!chosenGroup) {
+                const firstAudio = media.find(item => (item.attrs['TYPE'] || '').toUpperCase() === 'AUDIO');
+                if (firstAudio) {
+                    chosenGroup = firstAudio.attrs['GROUP-ID'] || null;
+                    chosenLine = firstAudio.line;
+                }
+            }
+            if (chosenLine && chosenGroup) header.push(chosenLine);
+            let streamInfo = best.info;
+            if (chosenGroup) {
+                if (/AUDIO="/.test(streamInfo)) streamInfo = streamInfo.replace(/AUDIO="[^"]+"/, `AUDIO="${chosenGroup}"`);
+                else streamInfo = streamInfo.replace('#EXT-X-STREAM-INF:', `#EXT-X-STREAM-INF:AUDIO="${chosenGroup}",`);
+            }
+            header.push(streamInfo, best.url);
+        }
+
+        res.send(header.join('\n') + '\n');
+    } catch (error) {
+        console.error('[vixsynthetic] error:', (error as any)?.message || error);
+        res.status(500).send('#EXTM3U\n# internal error');
+    }
+});
+
 app.get('/', (_req, res) => {
     const manifest = loadCustomConfig();
     res.setHeader('Content-Type', 'text/html');

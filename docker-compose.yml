@@ -5,9 +5,11 @@ services:
     container_name: streamvix-lite
     ports:
       - "7860:7860"
+    # 1.1.1.1 non risponde su alcune reti italiane e causa 5-10s di attesa
+    # per ogni lookup DNS. 1.0.0.1 e 8.8.8.8 rispondono regolarmente.
     dns:
-      - 1.1.1.1
       - 1.0.0.1
+      - 8.8.8.8
     environment:
       # - TMDB_API_KEY=your_tmdb_api_key                 # https://www.themoviedb.org/settings/api
       # - ADDON_BASE_URL=https://yourdomain.com          # For VixSrc to work optimally

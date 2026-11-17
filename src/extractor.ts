@@ -10,6 +10,14 @@ const VIXCLOUD_EMBED_BASE_PATH = "/embed"; // Base path for embed URLs, e.g., /e
 // --- TMDB Configuration ---
 const TMDB_API_BASE_URL = "https://api.themoviedb.org/3";
 
+// Hard timeout for a single external request. Without it, a stalled DNS lookup
+// or socket can keep a stream request hanging for tens of seconds.
+const VIX_FETCH_TIMEOUT_MS = 15000;
+
+function fetchWithTimeout(url: string, init: any = {}, timeoutMs = VIX_FETCH_TIMEOUT_MS): Promise<any> {
+  return fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+}
+
 // --- IMDB to TMDB Static Mapping ---
 interface ImdbToTmdbMapping {
   imdbSeason: number;
@@ -166,7 +174,7 @@ async function fetchVixCloudSiteVersion(siteOrigin: string): Promise<string> {
 
   const versionUrl = `${siteOrigin}${VIXCLOUD_REQUEST_TITLE_PATH}`;
   try {
-    const response = await fetch(versionUrl, {
+    const response = await fetchWithTimeout(versionUrl, {
       headers: {
         "Referer": `${siteOrigin}/`,
         "Origin": siteOrigin,
@@ -250,7 +258,7 @@ export async function getTmdbIdFromImdbId(imdbId: string, tmdbApiKey?: string, p
   }
   const findUrl = `${TMDB_API_BASE_URL}/find/${imdbIdOnly}?api_key=${tmdbApiKey}&external_source=imdb_id`;
   try {
-    const response = await fetch(findUrl);
+    const response = await fetchWithTimeout(findUrl, {}, 10000);
     if (!response.ok) {
       console.error(`Failed to fetch TMDB ID for ${imdbIdOnly}: ${response.status}`);
       return null;
@@ -419,13 +427,13 @@ async function checkUrlExists(url: string): Promise<boolean> {
   try {
     console.log(`VIX_CHECK: Checking existence via HEAD: ${url}`);
     // Importante: User-Agent specifico per evitare blocchi
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
       method: 'HEAD',
       headers: {
         'User-Agent': 'Mozilla/5.0 (StreamVix EarlyDirect)',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
       }
-    });
+    }, 10000);
 
     // 200 OK -> Esiste
     // 301/302 -> Redirect (spesso a trailing slash o altra pagina valida) -> Esiste
@@ -667,7 +675,7 @@ export async function getStreamContent(id: string, type: ContentType, config: Ex
     if (!tmdbId) return null;
     const movieDetailsUrl = `${TMDB_API_BASE_URL}/movie/${tmdbId}?api_key=${tmdbApiKey}&language=it`;
     try {
-      const response = await fetch(movieDetailsUrl);
+      const response = await fetchWithTimeout(movieDetailsUrl, {}, 10000);
       if (!response.ok) {
         console.error(`Error fetching movie title for TMDB ID ${tmdbId}: ${response.status}`);
         return null;
@@ -692,7 +700,7 @@ export async function getStreamContent(id: string, type: ContentType, config: Ex
     if (!tmdbId) return null;
     const seriesDetailsUrl = `${TMDB_API_BASE_URL}/tv/${tmdbId}?api_key=${tmdbApiKey}&language=it`;
     try {
-      const response = await fetch(seriesDetailsUrl);
+      const response = await fetchWithTimeout(seriesDetailsUrl, {}, 10000);
       if (!response.ok) {
         console.error(`Error fetching series title for TMDB ID ${tmdbId}: ${response.status}`);
         return null;
@@ -715,7 +723,7 @@ export async function getStreamContent(id: string, type: ContentType, config: Ex
     try {
       if (url.includes("/iframe")) {
         const version = await fetchVixCloudSiteVersion(siteOrigin);
-        const initialResponse = await fetch(url, {
+        const initialResponse = await fetchWithTimeout(url, {
           headers: {
             "x-inertia": "true",
             "x-inertia-version": version,
@@ -729,7 +737,7 @@ export async function getStreamContent(id: string, type: ContentType, config: Ex
 
         if (iframeSrc) {
           const actualPlayerUrl = new URL(iframeSrc, siteOrigin).toString();
-          const playerResponse = await fetch(actualPlayerUrl, {
+          const playerResponse = await fetchWithTimeout(actualPlayerUrl, {
             headers: {
               "x-inertia": "true",
               "x-inertia-version": version,
@@ -747,7 +755,7 @@ export async function getStreamContent(id: string, type: ContentType, config: Ex
         if (url.includes("/tv/") || url.includes("/movie/")) {
           const apiUrl = url.replace("/tv/", "/api/tv/").replace("/movie/", "/api/movie/");
           try {
-            const apiRes = await fetch(apiUrl);
+            const apiRes = await fetchWithTimeout(apiUrl, {}, 10000);
             if (apiRes.ok) {
                const apiJson = await apiRes.json();
                if (apiJson && apiJson.src) {
@@ -762,7 +770,7 @@ export async function getStreamContent(id: string, type: ContentType, config: Ex
           }
         }
 
-        const response = await fetch(targetFetchUrl, {
+        const response = await fetchWithTimeout(targetFetchUrl, {
           headers: {
             "Referer": url
           }

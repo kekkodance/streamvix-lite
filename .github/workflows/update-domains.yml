@@ -5,15 +5,20 @@ on:
     - cron: '0 22 * * *' # Every day at 22:00 UTC
   workflow_dispatch: {}
 
+permissions:
+  contents: write
+  actions: write
+
 jobs:
   update:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.x'
 
@@ -42,3 +47,9 @@ jobs:
           if [ -f attenzione.check ]; then git add attenzione.check; fi
           git commit -m "fix: domains update" || echo "Nothing to commit"
           git push || echo "Push skipped"
+
+      - name: Trigger image build
+        if: env.changes == 'yes'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run dockerhub.yml --ref main

@@ -1,5 +1,5 @@
 # Stage 1: Build stage
-FROM node:20-slim AS builder
+FROM node:24-slim AS builder
 
 # Set working directory
 WORKDIR /usr/src/app
@@ -13,35 +13,23 @@ RUN npm ci
 # Copy the rest of the source code
 COPY . .
 
-# Build the project (TypeScript compilation + folder structure)
-RUN npm run build
+# Build the project, then drop devDependencies before copying to the runtime stage
+RUN npm run build && npm prune --omit=dev --no-save
 
 # Stage 2: Runtime stage
-FROM node:20-slim
+FROM node:24-slim
 
 # Set environment to production
 ENV NODE_ENV=production
 
-# Install essential runtime dependencies
-# We include Python3 in case it's needed for resolvers or scripts
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
 # Set working directory
 WORKDIR /usr/src/app
 
-# Copy only dependency files
-COPY package.json package-lock.json ./
-
-# Install only production dependencies
-RUN npm ci --omit=dev
-
-# Copy compiled files from the builder stage
+# Copy production dependencies and compiled files from the builder stage
+COPY --from=builder /usr/src/app/package.json ./
+COPY --from=builder /usr/src/app/node_modules ./node_modules
 COPY --from=builder /usr/src/app/dist ./dist
 COPY --from=builder /usr/src/app/config ./config
-COPY --from=builder /usr/src/app/scripts ./scripts
 COPY --from=builder /usr/src/app/addon-config.json ./
 
 # Set the user to 'node' for security

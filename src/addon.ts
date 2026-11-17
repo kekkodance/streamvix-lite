@@ -5,7 +5,6 @@ import * as fs from 'fs';
 import { landingTemplate } from './landingPage';
 import * as path from 'path';
 import express, { Request, Response, NextFunction } from 'express';
-import fetch from 'node-fetch';
 import { AnimeUnityProvider } from './providers/animeunity-provider';
 import { AnimeWorldProvider } from './providers/animeworld-provider';
 

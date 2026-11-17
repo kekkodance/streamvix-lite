@@ -324,11 +324,11 @@ function landingTemplate(manifest: any) {
 					<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 0.85rem;">
 						<div class="preset-card" data-preset="film-serie" style="padding: 1rem; border: 2px solid rgba(140, 82, 255, 0.4); border-radius: 10px; background: rgba(45, 21, 68, 0.7); cursor: pointer; transition: all 0.3s ease;">
 							<div style="font-weight: 700; font-size: 0.95rem; margin-bottom: 0.4rem; color: #c9b3ff;">Film + Serie</div>
-							<div style="font-size: 0.7rem; color: #888; line-height: 1.4;">StreamingCommunity, Guardaflix, Guardoserie</div>
+							<div style="font-size: 0.7rem; color: #888; line-height: 1.4;">StreamingCommunity, Guardaflix</div>
 						</div>
 						<div class="preset-card" data-preset="film-serie-anime" style="padding: 1rem; border: 2px solid rgba(140, 82, 255, 0.4); border-radius: 10px; background: rgba(45, 21, 68, 0.7); cursor: pointer; transition: all 0.3s ease;">
 							<div style="font-weight: 700; font-size: 0.95rem; margin-bottom: 0.4rem; color: #c9b3ff;">Film + Serie + Anime</div>
-							<div style="font-size: 0.7rem; color: #888; line-height: 1.4;">StreamingCommunity, Guardaflix, Guardoserie, AnimeSaturn, AnimeWorld, AnimeUnity</div>
+							<div style="font-size: 0.7rem; color: #888; line-height: 1.4;">StreamingCommunity, Guardaflix, AnimeSaturn, AnimeWorld, AnimeUnity</div>
 						</div>
 					</div>
 				</div>
@@ -387,7 +387,6 @@ function landingTemplate(manifest: any) {
 					'animeunityEnabled': { title: 'AnimeUnity', invert: false },
 					'animesaturnEnabled': { title: 'AnimeSaturn', invert: false },
 					'animeworldEnabled': { title: 'AnimeWorld', invert: false },
-					'guardoserieEnabled': { title: 'GuardoSerie', invert: false },
 					'guardaflixEnabled': { title: 'Guardaflix', invert: false },
 				}
 				if (toggleMap[key]) {
@@ -634,13 +633,13 @@ function landingTemplate(manifest: any) {
 				var presets = {
 					'film-serie': {
 						name: 'Film + Serie',
-						providers: ['Guardaflix', 'StreamingCommunity', 'Guardoserie'],
-						config: { disableVixsrc:false, guardoserieEnabled:true, guardaflixEnabled:true, animeunityEnabled:false, animesaturnEnabled:false, animeworldEnabled:false }
+						providers: ['Guardaflix', 'StreamingCommunity'],
+						config: { disableVixsrc:false, guardaflixEnabled:true, animeunityEnabled:false, animesaturnEnabled:false, animeworldEnabled:false }
 					},
 					'film-serie-anime': {
 						name: 'Film + Serie + Anime',
-						providers: ['Guardaflix', 'StreamingCommunity', 'Guardoserie', 'AnimeSaturn', 'AnimeWorld', 'AnimeUnity'],
-						config: { disableVixsrc:false, guardoserieEnabled:true, guardaflixEnabled:true, animeunityEnabled:true, animesaturnEnabled:true, animeworldEnabled:true }
+						providers: ['Guardaflix', 'StreamingCommunity', 'AnimeSaturn', 'AnimeWorld', 'AnimeUnity'],
+						config: { disableVixsrc:false, guardaflixEnabled:true, animeunityEnabled:true, animesaturnEnabled:true, animeworldEnabled:true }
 					}
 				};
 

@@ -54,7 +54,10 @@ function normalizeEpisodePath(pathOrUrl: string | null | undefined): string | nu
   }
   if (!value.startsWith('/')) value = `/${value}`;
   value = value.replace(/\/+$/, '');
-  const match = value.match(/^\/ep\/[^/?#]+/i);
+  const match =
+    value.match(/^\/episode\/[^/?#]+\/ep-\d+/i) ||
+    value.match(/^\/anime\/[^/?#]+\/ep-\d+/i) ||
+    value.match(/^\/ep\/[^/?#]+/i);
   return match ? match[0] : null;
 }
 
@@ -171,6 +174,106 @@ function collectMediaLinksFromWatchHtml(html: string): string[] {
   return links;
 }
 
+function extractSaturnPlayerPageUrl(html: string, episodeUrl: string): string | null {
+  const $ = cheerio.load(String(html || ''));
+  const candidates: { href: string; text: string }[] = [];
+  $('a[href]').each((_, el) => {
+    const href = String($(el).attr('href') || '').trim();
+    if (!href) return;
+    const text = String($(el).text() || '').replace(/\s+/g, ' ').trim();
+    candidates.push({ href, text });
+  });
+  const playerPath = /^\/anime\/[^/?#]+\/ep-\d+/i;
+  const preferred = candidates.find(({ href, text }) => playerPath.test(href) && /guarda\s+lo\s+streaming/i.test(text));
+  let fallback = candidates.find(({ href }) => playerPath.test(href));
+  try {
+    const episodeMatch = new URL(episodeUrl).pathname.match(/^\/episode\/([^/?#]+)\/ep-(\d+)/i);
+    if (episodeMatch) {
+      const expected = new RegExp(`^/anime/${episodeMatch[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/ep-${episodeMatch[2]}$`, 'i');
+      fallback = candidates.find(({ href }) => expected.test(href));
+    }
+  } catch {
+    // keep the generic fallback
+  }
+  const chosen = preferred?.href || fallback?.href;
+  if (!chosen) return null;
+  try {
+    return new URL(chosen, episodeUrl).toString();
+  } catch {
+    return null;
+  }
+}
+
+function extractSaturnEmbedConfig(html: string): { id: string; key: string; expires: string } | null {
+  const block = String(html || '').match(/window\.__E\s*=\s*\{[^}]*\}/i);
+  if (!block) return null;
+  const id = block[0].match(/\bi\s*:\s*(\d+)/i)?.[1];
+  const key = block[0].match(/\bk\s*:\s*["']([^"']+)["']/i)?.[1];
+  const expires = block[0].match(/\be\s*:\s*(\d+)/i)?.[1];
+  if (!id || !key || !expires) return null;
+  return { id, key, expires };
+}
+
+function decryptSaturnPayload(payload: string, key: string): string {
+  try {
+    const decoded = Buffer.from(String(payload || ''), 'base64');
+    let output = '';
+    for (let index = 0; index < decoded.length; index += 1) {
+      output += String.fromCharCode(decoded[index] ^ key.charCodeAt(index % key.length));
+    }
+    return output;
+  } catch {
+    return '';
+  }
+}
+
+async function resolveSaturnEmbedMedia(embedUrl: string, referer: string): Promise<string | null> {
+  let html = '';
+  try {
+    html = await fetchResource(embedUrl, asCaches, {
+      ttlMs: 5 * 60 * 1000,
+      cacheKey: `as-embed:${embedUrl}`,
+      timeoutMs: AS_FETCH_TIMEOUT,
+      headers: { referer },
+    });
+  } catch {
+    return null;
+  }
+
+  const config = extractSaturnEmbedConfig(String(html || ''));
+  if (!config) return null;
+
+  let playlistUrl: string;
+  try {
+    const base = new URL(embedUrl);
+    const playlist = new URL(`/embed/${config.id}/playlist`, base);
+    playlist.searchParams.set('token', config.key);
+    playlist.searchParams.set('expires', config.expires);
+    playlistUrl = playlist.toString();
+  } catch {
+    return null;
+  }
+
+  let payload: any = null;
+  try {
+    payload = await fetchResource(playlistUrl, asCaches, {
+      as: 'json',
+      ttlMs: 5 * 60 * 1000,
+      cacheKey: `as-embed-playlist:${playlistUrl}`,
+      timeoutMs: AS_FETCH_TIMEOUT,
+      headers: {
+        accept: 'application/json',
+        referer: embedUrl,
+      },
+    });
+  } catch {
+    return null;
+  }
+
+  const decrypted = decryptSaturnPayload(String(payload?.d || ''), config.key);
+  return normalizePlayableMediaUrl(decrypted);
+}
+
 async function asSearch(query: string): Promise<AnimeSaturnResult[]> {
   const q = encodeURIComponent(String(query || '').trim());
   if (!q) return [];
@@ -214,7 +317,7 @@ async function asGetEpisodes(animeUrl: string): Promise<AnimeSaturnEpisode[]> {
   const $ = cheerio.load(String(html || ''));
   const episodes: AnimeSaturnEpisode[] = [];
   const seen = new Set<string>();
-  $('a[href*="/ep/"]').each((index, el) => {
+  $('a[href*="/episode/"], a[href*="/ep/"]').each((index, el) => {
     const href = normalizeEpisodePath($(el).attr('href') || null);
     if (!href || seen.has(href)) return;
     seen.add(href);
@@ -246,6 +349,36 @@ async function asGetStream(episodeUrl: string): Promise<{ url: string | null; he
   }
 
   const initialWatch = extractWatchUrlsFromHtml(String(html || ''));
+
+  // New flow: episode page -> "Guarda lo streaming" player page -> Saturn embed.
+  const playerPageUrl = extractSaturnPlayerPageUrl(String(html || ''), entryUrl);
+  if (playerPageUrl) {
+    let playerHtml = '';
+    try {
+      playerHtml = await fetchResource(playerPageUrl, asCaches, {
+        ttlMs: 5 * 60 * 1000,
+        cacheKey: `as-player:${playerPageUrl}`,
+        timeoutMs: AS_FETCH_TIMEOUT,
+        headers: { referer: entryUrl },
+      });
+    } catch {
+      playerHtml = '';
+    }
+    if (playerHtml) {
+      const $player = cheerio.load(String(playerHtml));
+      const embedSrc = $player('iframe[src*="saturncdn.net/embed"], iframe[src*="/embed/"]').first().attr('src');
+      if (embedSrc) {
+        try {
+          const embedUrl = new URL(String(embedSrc), playerPageUrl).toString();
+          const mediaUrl = await resolveSaturnEmbedMedia(embedUrl, playerPageUrl);
+          if (mediaUrl) return { url: mediaUrl };
+        } catch {
+          // fall through to the legacy /watch flow
+        }
+      }
+    }
+  }
+
   const queue = [...initialWatch];
   const visited = new Set<string>();
   let processed = 0;
@@ -351,6 +484,20 @@ async function getEnglishTitleFromAnyId(id: string, type: 'imdb'|'tmdb'|'kitsu'|
       }
     } catch (err) {
       console.warn('[UniversalTitle] Errore Jikan, provo fallback TMDB:', err);
+    }
+  }
+  if (type === 'kitsu') {
+    // Jikan may be unreachable (or rate-limited): fall back to Kitsu's own titles.
+    try {
+      const kitsuMain = await (await fetch(`https://kitsu.io/api/edge/anime/${id}`)).json();
+      const attr = kitsuMain?.data?.attributes || {};
+      const kitsuTitle = attr?.titles?.en || attr?.titles?.en_jp || attr?.canonicalTitle || '';
+      if (kitsuTitle) {
+        console.warn(`[UniversalTitle] Fallback: uso titolo da Kitsu: ${kitsuTitle}`);
+        return kitsuTitle;
+      }
+    } catch (err) {
+      console.warn(`[UniversalTitle] Errore fallback Kitsu per ${id}:`, err);
     }
   }
   if (tmdbId && tmdbKey) {

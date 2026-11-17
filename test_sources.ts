@@ -2,7 +2,6 @@ import { getStreamContent } from './src/extractor';
 import { AnimeUnityProvider } from './src/providers/animeunity-provider';
 import { AnimeSaturnProvider } from './src/providers/animesaturn-provider';
 import { AnimeWorldProvider } from './src/providers/animeworld-provider';
-import { getGuardoserieStreams } from './src/providers/guardoserie';
 import { getGuardaflixStreams } from './src/providers/guardaflix';
 
 process.env.TMDB_API_KEY = '40a9faa1f6741afb2c0c40238d85f8d0';
@@ -59,21 +58,12 @@ async function testAnimeWorld() {
     }
 }
 
-async function testGuardoserie() {
-    console.log('\n--- Testing Guardoserie (New) ---');
-    try {
-        const results = await getGuardoserieStreams('series', 'tt1190634:1:1', process.env.TMDB_API_KEY); // The Boys
-        console.log(`Guardoserie: Found ${results?.length || 0} streams`);
-        results?.slice(0, 2).forEach(s => console.log(` - ${s.title}: ${s.url.substring(0, 100)}...`));
-    } catch (e: any) {
-        console.error('Guardoserie Error:', e.message);
-    }
-}
-
 async function testGuardaflix() {
     console.log('\n--- Testing Guardaflix ---');
     try {
-        const results = await getGuardaflixStreams('movie', 'tt0816692'); // Inception
+        // Current titles use mload.cam (Abyss). Older titles (e.g. Inception)
+        // still point to a dead loadm.cam embed upstream.
+        const results = await getGuardaflixStreams('movie', 'tt2103254'); // Tammy (2014)
         console.log(`Guardaflix: Found ${results?.length || 0} streams`);
         results?.slice(0, 2).forEach(s => console.log(` - ${s.title}: ${s.url.substring(0, 100)}...`));
     } catch (e: any) {
@@ -87,7 +77,6 @@ async function runAllTests() {
     await testAnimeUnity();
     await testAnimeSaturn();
     await testAnimeWorld();
-    await testGuardoserie();
     await testGuardaflix();
     console.log('\nValidation complete.');
 }

@@ -24,8 +24,14 @@ export class VixCloudHlsExtractor implements HostExtractor {
         'Accept': '*/*',
         'Connection': 'keep-alive',
         'Cache-Control': 'no-cache',
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0'
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0',
+        'Referer': ctx.referer || 'https://vixcloud.cc/'
       };
+      try {
+        headers['Origin'] = new URL(headers['Referer']).origin;
+      } catch {
+        headers['Origin'] = 'https://vixcloud.cc';
+      }
       const res = await fetch(embedUrl, { headers });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const html = await res.text();

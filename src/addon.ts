@@ -17,7 +17,7 @@ declare function require(name: string): any;
 declare const global: any;
 import { AnimeUnityConfig } from './types/animeunity';
 import { getGuardaflixStreams } from './providers/guardaflix';
-import { getGuardoserieStreams } from './providers/guardoserie';
+import { handleAbyssProxy } from './extractors/abyss';
 
 // ================= TYPES & INTERFACES =================
 interface AddonConfig {
@@ -25,7 +25,6 @@ interface AddonConfig {
     animeunityEnabled?: boolean;
     animesaturnEnabled?: boolean;
     animeworldEnabled?: boolean;
-    guardoserieEnabled?: boolean;
     guardaflixEnabled?: boolean;
     disableVixsrc?: boolean;
 }
@@ -40,7 +39,7 @@ const baseManifest: Manifest = {
     id: "dance.kekko.streamvix-lite",
     version: "11.0.23",
     name: "streamvix-lite",
-    description: "streamvix-lite addon con StreamingCommunity, Guardoserie, AnimeUnity, AnimeSaturn, AnimeWorld e Guardaflix",
+    description: "streamvix-lite addon con StreamingCommunity, AnimeUnity, AnimeSaturn, AnimeWorld e Guardaflix",
     background: "https://raw.githubusercontent.com/qwertyuiop8899/streamvix/refs/heads/main/public/backround.png",
     types: ["movie", "series", "anime"],
     idPrefixes: ["tt", "kitsu", "mal", "tmdb"],
@@ -54,7 +53,6 @@ const baseManifest: Manifest = {
         { key: "animeunityEnabled", title: "Enable AnimeUnity", type: "checkbox" },
         { key: "animesaturnEnabled", title: "Enable AnimeSaturn", type: "checkbox" },
         { key: "animeworldEnabled", title: "Enable AnimeWorld", type: "checkbox" },
-        { key: "guardoserieEnabled", title: "Enable Guardoserie", type: "checkbox" },
         { key: "guardaflixEnabled", title: "Enable Guardaflix", type: "checkbox" },
     ],
 };
@@ -143,7 +141,6 @@ function createBuilder() {
                 const animeUnityEnabled = envFlag('ANIMEUNITY_ENABLED') ?? (isDirectAPICall || config.animeunityEnabled === true);
                 const animeSaturnEnabled = envFlag('ANIMESATURN_ENABLED') ?? (isDirectAPICall || config.animesaturnEnabled === true);
                 const animeWorldEnabled = envFlag('ANIMEWORLD_ENABLED') ?? (isDirectAPICall || config.animeworldEnabled === true);
-                const guardoserieEnabled = isDirectAPICall || (config.guardoserieEnabled === true);
                 const guardaflixEnabled = isDirectAPICall || (config.guardaflixEnabled === true);
                 const vixsrcEnabled = !(config.disableVixsrc === true);
 
@@ -203,14 +200,6 @@ function createBuilder() {
                     }, providerLabel('vixsrc')));
                 }
 
-                // Guardoserie
-                if (guardoserieEnabled && type === 'series') {
-                    providerPromises.push(runProvider('Guardoserie', true, async () => {
-                        const res = await getGuardoserieStreams(type, id, tmdbApiKey);
-                        return { streams: res || [] };
-                    }, providerLabel('guardoserie')));
-                }
-
                 // Guardaflix
                 if (guardaflixEnabled && type === 'movie') {
                     providerPromises.push(runProvider('Guardaflix', true, async () => {
@@ -268,6 +257,7 @@ function createBuilder() {
 }
 
 const app = express();
+app.set('trust proxy', true);
 const builder = createBuilder();
 const addonInterface = builder.getInterface();
 const router = getRouter(addonInterface);
@@ -275,6 +265,12 @@ const router = getRouter(addonInterface);
 app.use((req, res, next) => {
     (global as any).lastExpressRequest = req;
     next();
+});
+
+// Range proxy used by Abyss (Guardaflix) streams.
+// Mounted before the addon router so it never collides with Stremio routes.
+app.get('/abyss/:file', (req, res) => {
+    void handleAbyssProxy(req, res);
 });
 
 app.get('/', (_req, res) => {

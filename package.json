@@ -1,7 +1,7 @@
 {
   "name": "streamvix-lite",
   "version": "1.0.0",
-  "description": "streamvix-lite addon con StreamingCommunity, Guardaserie, AnimeUnity, AnimeSaturn, AnimeWorld e Guardaflix",
+  "description": "streamvix-lite addon con StreamingCommunity, AnimeUnity, AnimeSaturn, AnimeWorld e Guardaflix",
   "main": "dist/addon.js",
   "scripts": {
     "build": "tsc && shx mkdir -p dist/config && shx cp src/config/*.json dist/config/",

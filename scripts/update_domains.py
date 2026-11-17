@@ -24,6 +24,11 @@ KEY_HINTS = {
     'vixsrc': re.compile(r'vixsrc\.[a-z]{2,}|streamingcommunity\.[a-z]{2,}'),
 }
 
+# Static overrides for sources that are known to be stale upstream (e.g. Pastebin).
+STATIC_DOMAIN_OVERRIDES = {
+    'animeunity': 'animeunity.cx',
+}
+
 def fetch(url: str) -> str:
     try:
         req = urllib.request.Request(
@@ -91,7 +96,7 @@ def main():
         current = {
             'animesaturn': 'animesaturn.cx',
             'vixsrc': 'vixsrc.to',
-            'animeunity': 'animeunity.so',
+            'animeunity': 'animeunity.cx',
             'animeworld': 'animeworld.ac',
             'guardoserie': 'guardoserie.bar',
             'guardaflix': 'guardaplay.bar'
@@ -121,9 +126,9 @@ def main():
 
     for key in KEY_ORDER:
         hint_re = KEY_HINTS.get(key)
-        if not hint_re:
+        if not hint_re and key not in STATIC_DOMAIN_OVERRIDES:
             continue
-        new_host = pick_host(all_hosts, hint_re)
+        new_host = STATIC_DOMAIN_OVERRIDES.get(key) or pick_host(all_hosts, hint_re)
         if not new_host:
             continue
         old_host = updated.get(key)

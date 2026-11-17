@@ -85,6 +85,7 @@ interface AnimeUnitySearchResult {
   name_it?: string; // Titolo italiano (opzionale)
   name_eng?: string; // Titolo inglese (opzionale)
   episodes_count: number;
+  language_hint?: 'ITA' | 'SUB ITA';
 }
 
 interface AnimeUnityEpisode {
@@ -103,7 +104,8 @@ function getUnityBaseUrl(): string {
   const configured = getProviderUrl('animeunity', ['ANIMEUNITY_BASE_URL', 'AU_BASE_URL']);
   if (configured) return configured.replace(/\/+$/, '');
   const host = getDomain('animeunity') || 'animeunity.so';
-  return `https://www.${host}`.replace(/\/+$/, '');
+  // The www host no longer resolves on the current domain: use the apex.
+  return `https://${host}`.replace(/\/+$/, '');
 }
 
 function normalizeAnimePath(pathOrUrl: string | null | undefined): string | null {
@@ -132,6 +134,32 @@ function buildUnityUrl(pathOrUrl: string | null | undefined): string | null {
   if (/^https?:\/\//i.test(text)) return text;
   if (text.startsWith('/')) return `${getUnityBaseUrl()}${text}`;
   return `${getUnityBaseUrl()}/${text}`;
+}
+
+function parseInertiaPage(html: string): any | null {
+  try {
+    const $ = cheerio.load(String(html || ''));
+    const raw = $('#app').attr('data-page');
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function pickVideoLanguage(normalizedPath: string, languageOverride?: string): 'ita' | 'jpn' {
+  const path = String(normalizedPath || '');
+  const override = String(languageOverride || '').toUpperCase();
+  if (override === 'ITA') return 'ita';
+  if (override === 'SUB' || override === 'SUB ITA') return 'jpn';
+  if (/-ita(?:$|[-/])/i.test(path) || /doppiato/i.test(path)) return 'ita';
+  return 'jpn';
+}
+
+function pickEpisodeVideoId(videos: any, preferredLanguage: 'ita' | 'jpn'): number | null {
+  if (!Array.isArray(videos) || !videos.length) return null;
+  const match = videos.find((video: any) => String(video?.language || '').toLowerCase() === preferredLanguage);
+  return parsePositiveInt((match || videos[0])?.id);
 }
 
 function parseVideoPlayerJson(rawValue: string | undefined | null, fallback: any) {
@@ -195,7 +223,71 @@ async function getSessionData(): Promise<AnimeUnitySession | null> {
   }
 }
 
+async function searchArchiveApi(query: string, dubbed: boolean): Promise<AnimeUnitySearchResult[]> {
+  try {
+    const payload = await auFetchResource(
+      `${getUnityBaseUrl()}/api/search?q=${encodeURIComponent(query)}`,
+      caches,
+      {
+        as: 'json',
+        ttlMs: TTL.http,
+        cacheKey: `au-search:${query}:${dubbed ? 'dub' : 'sub'}`,
+        timeoutMs: FETCH_TIMEOUT,
+        headers: {
+          accept: 'application/json',
+          referer: getUnityBaseUrl(),
+        },
+      }
+    );
+
+    const rows = Array.isArray(payload?.data) ? payload.data : [];
+    const out: AnimeUnitySearchResult[] = [];
+    const seen = new Set<number>();
+
+    for (const record of rows) {
+      const id = Number(record?.id);
+      if (!id || seen.has(id)) continue;
+
+      const languages = Array.isArray(record?.variants)
+        ? record.variants
+            .map((variant: any) => String(variant?.language || '').toLowerCase())
+            .filter(Boolean)
+        : [];
+      if (languages.length) {
+        const wanted = dubbed ? 'ita' : 'jpn';
+        if (!languages.includes(wanted)) continue;
+      }
+
+      const nameIt = String(record?.title_it || '').trim();
+      const nameEng = String(record?.title || '').trim();
+      const display = nameIt || nameEng;
+      if (!display) continue;
+
+      seen.add(id);
+      out.push({
+        id,
+        slug: String(record?.slug || '').trim(),
+        name: display,
+        name_it: nameIt,
+        name_eng: nameEng,
+        episodes_count: Number(record?.total_episodes || 0),
+        language_hint: languages.length ? (dubbed ? 'ITA' : 'SUB ITA') : undefined,
+      });
+    }
+
+    return out;
+  } catch (error: any) {
+    console.warn('[AnimeUnity] archive search API failed:', error?.message || error);
+    return [];
+  }
+}
+
 async function searchEndpoint(query: string, dubbed = false): Promise<AnimeUnitySearchResult[]> {
+  // Current site: unauthenticated JSON search endpoint.
+  const modernResults = await searchArchiveApi(query, dubbed);
+  if (modernResults.length) return modernResults;
+
+  // Legacy site: live search + archive endpoints with CSRF session.
   const session = await getSessionData();
   if (!session) return [];
 
@@ -261,20 +353,25 @@ async function searchEndpoint(query: string, dubbed = false): Promise<AnimeUnity
   return out;
 }
 
-async function fetchEpisodesRangeFromApi(animeId: number, requestedEpisode: number, animeUrl: string): Promise<AnimeUnityEpisode[]> {
+async function fetchEpisodesRangeFromApi(
+  animeId: number,
+  requestedEpisode: number,
+  animeUrl: string,
+  preferredLanguage: 'ita' | 'jpn' = 'jpn'
+): Promise<AnimeUnityEpisode[]> {
   const startRange = Math.floor((requestedEpisode - 1) / 120) * 120 + 1;
-  const endRange = startRange + 119;
 
   try {
     const payload = await auFetchResource(
-      `${getUnityBaseUrl()}/info_api/${animeId}/1?start_range=${startRange}&end_range=${endRange}`,
+      `${getUnityBaseUrl()}/api/anime/${animeId}/episodes?start=${startRange}`,
       caches,
       {
         as: 'json',
         ttlMs: TTL.animePage,
-        cacheKey: `au-info:${animeId}:${startRange}:${endRange}`,
+        cacheKey: `au-episodes:${animeId}:${startRange}`,
         timeoutMs: FETCH_TIMEOUT,
         headers: {
+          accept: 'application/json',
           'x-requested-with': 'XMLHttpRequest',
           referer: animeUrl,
         },
@@ -282,12 +379,12 @@ async function fetchEpisodesRangeFromApi(animeId: number, requestedEpisode: numb
     );
     const rows = Array.isArray(payload?.episodes) ? payload.episodes : [];
     return rows.map((entry: any, index: number) => ({
-      id: Number(entry?.id || 0),
+      id: pickEpisodeVideoId(entry?.videos, preferredLanguage) || parsePositiveInt(entry?.id) || 0,
       number: parseEpisodeNumber(entry?.number || entry?.link, index + 1),
       name: String(entry?.name || '').trim() || undefined,
     })).filter((entry: AnimeUnityEpisode) => !!entry.id);
   } catch (error: any) {
-    console.warn('[AnimeUnity] info_api request failed:', error?.message || error);
+    console.warn('[AnimeUnity] episodes API request failed:', error?.message || error);
     return [];
   }
 }
@@ -303,8 +400,9 @@ async function getStreamData(animeId: number, animeSlug: string, episodeId: numb
     });
 
     const $ = cheerio.load(String(html || ''));
+    const inertia = parseInertiaPage(String(html || ''));
     const vp = $('video-player').first();
-    let embedUrl = toAbsoluteUrl(vp.attr('embed_url') || null, getUnityBaseUrl());
+    let embedUrl = toAbsoluteUrl(inertia?.props?.embedUrl || vp.attr('embed_url') || null, getUnityBaseUrl());
 
     if (!embedUrl) {
       const iframeSrc = $('iframe[src*="vixcloud"]').first().attr('src');
@@ -408,6 +506,20 @@ async function getEnglishTitleFromAnyId(id: string, type: 'imdb' | 'tmdb' | 'kit
       }
     } catch (err) {
       console.warn('[UniversalTitle] Errore Jikan, provo fallback TMDB:', err);
+    }
+  }
+  if (type === 'kitsu') {
+    // Jikan may be unreachable (or rate-limited): fall back to Kitsu's own titles.
+    try {
+      const kitsuMain = await (await fetch(`https://kitsu.io/api/edge/anime/${id}`)).json();
+      const attr = kitsuMain?.data?.attributes || {};
+      const kitsuTitle = attr?.titles?.en || attr?.titles?.en_jp || attr?.canonicalTitle || '';
+      if (kitsuTitle) {
+        console.warn(`[UniversalTitle] Fallback: uso titolo da Kitsu: ${kitsuTitle}`);
+        return kitsuTitle;
+      }
+    } catch (err) {
+      console.warn(`[UniversalTitle] Errore fallback Kitsu per ${id}:`, err);
     }
   }
   if (tmdbId && tmdbKey) {
@@ -606,9 +718,15 @@ export class AnimeUnityProvider {
     if (!html) return [];
 
     const $ = cheerio.load(String(html));
+    const inertia = parseInertiaPage(String(html));
+    const inertiaAnime = inertia?.props?.anime || {};
     const vp = $('video-player').first();
-    const animeData = parseVideoPlayerJson(vp.attr('anime'), {});
-    const episodesData = parseVideoPlayerJson(vp.attr('episodes'), []);
+    const legacyAnime = parseVideoPlayerJson(vp.attr('anime'), null);
+    const animeData = legacyAnime || inertiaAnime || {};
+    const legacyEpisodes = parseVideoPlayerJson(vp.attr('episodes'), null);
+    const episodesData = Array.isArray(legacyEpisodes) && legacyEpisodes.length
+      ? legacyEpisodes
+      : (Array.isArray(inertia?.props?.loadedEpisodes?.episodes) ? inertia.props.loadedEpisodes.episodes : []);
     const pageTitle =
       $('meta[property="og:title"]').attr('content') ||
       $('title').first().text().trim() ||
@@ -621,16 +739,17 @@ export class AnimeUnityProvider {
     const sourceTag = inferSourceTag(displayTitle, normalizedPath);
     const langLabel = languageOverride || (sourceTag === 'ITA' ? 'ITA' : 'SUB');
     const requestedEpisode = normalizeRequestedEpisode(requestedEpisodeInput);
+    const preferredLanguage = pickVideoLanguage(normalizedPath, languageOverride);
 
     const parsedPath = extractAnimeIdSlugFromPath(normalizedPath);
     const animeId = parsedPath.animeId || parsePositiveInt(animeData?.id);
-    const animeSlug = parsedPath.animeSlug || String(animeData?.slug || '').trim();
+    const animeSlug = String(animeData?.slug || parsedPath.animeSlug || '').trim();
     if (!animeId || !animeSlug) return [];
 
     let normalizedEpisodes = normalizeEpisodesList(
       (Array.isArray(episodesData) ? episodesData : []).map((entry: any, index: number) => ({
         num: parseEpisodeNumber(entry?.number || entry?.link, index + 1),
-        episodeId: entry?.id,
+        episodeId: pickEpisodeVideoId(entry?.videos, preferredLanguage) || entry?.id,
         scwsId: entry?.scws_id,
         fileName: entry?.file_name || entry?.link,
         link: entry?.link || entry?.file_name,
@@ -640,7 +759,7 @@ export class AnimeUnityProvider {
     );
 
     if (!normalizedEpisodes.length) {
-      const fetched = await fetchEpisodesRangeFromApi(animeId, requestedEpisode, animeUrl);
+      const fetched = await fetchEpisodesRangeFromApi(animeId, requestedEpisode, animeUrl, preferredLanguage);
       normalizedEpisodes = normalizeEpisodesList(
         fetched.map((entry, index) => ({
           num: parseEpisodeNumber(entry.number, index + 1),
@@ -825,12 +944,14 @@ export class AnimeUnityProvider {
       const seen = new Set();
       for (const r of allResults) {
         if (!r || !r.name || !r.id) continue;
-        const key = r.name + '|' + r.id;
+        const key = r.name + '|' + r.id + '|' + (r.language_hint || '');
         if (seen.has(key)) continue;
         seen.add(key);
         const nameLower = r.name.toLowerCase();
         let language_type = 'SUB ITA';
-        if (nameLower.includes('cr')) {
+        if (r.language_hint) {
+          language_type = r.language_hint;
+        } else if (nameLower.includes('cr')) {
           language_type = 'CR ITA';
         } else if (nameLower.includes('ita')) {
           language_type = 'ITA';

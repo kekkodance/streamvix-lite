@@ -5,6 +5,8 @@ import { buildUnifiedStreamName, providerLabel } from '../utils/unifiedNames';
 import * as cheerio from 'cheerio';
 import { fetch, ProxyAgent, Response } from 'undici';
 import { getDomain } from '../utils/domains';
+import { getAddonBaseUrl } from '../utils/addonBase';
+import { extractAbyssSource, isAbyssPlayerUrl, buildAbyssProxyUrl } from '../extractors/abyss';
 
 // Config constants - dynamic domain from domains.json
 const getTargetDomain = () => `https://${getDomain('guardaflix') || 'guardaplay.bar'}`;
@@ -191,13 +193,62 @@ async function extractLoadM(playerUrl: string, referer: string, isSub: boolean =
         const parts = playerUrl.split('#');
         const id = parts[1];
         const playerDomain = new URL(playerUrl).origin;
+
+        // New resolver first (the current frontend uses /api/public/resolve).
+        let resolvedUrl: string | null = null;
+        if (id) {
+            try {
+                const resolveResponse = await fetchWithBypass(`${playerDomain}/api/public/resolve?file1=${encodeURIComponent(id)}`, {
+                    headers: {
+                        'Accept': 'application/json',
+                        'Referer': `${playerDomain}/`,
+                        'Origin': playerDomain,
+                    },
+                    responseType: 'json'
+                });
+                const resolved = typeof resolveResponse?.data === 'string'
+                    ? JSON.parse(resolveResponse.data)
+                    : resolveResponse?.data;
+                resolvedUrl = String(resolved?.url || '').trim() || null;
+            } catch {
+                resolvedUrl = null;
+            }
+        }
+
+        if (resolvedUrl) {
+            return {
+                name: providerLabel('guardaflix'),
+                title: buildUnifiedStreamName({
+                    baseTitle: 'Stream',
+                    isSub: isSub,
+                    proxyOn: false,
+                    provider: 'guardaflix',
+                    playerName: 'LoadM',
+                    hideProviderInTitle: true
+                }),
+                url: resolvedUrl,
+                behaviorHints: {
+                    notWebReady: true,
+                    proxyHeaders: {
+                        request: {
+                            "Referer": playerUrl,
+                            "Origin": playerDomain,
+                            "User-Agent": SHARED_HEADERS['User-Agent']
+                        }
+                    }
+                }
+            };
+        }
+
         const apiUrl = `${playerDomain}/api/v1/video?id=${id}&w=2560&h=1440&r=${encodeURIComponent(referer)}`;
 
         const response = await fetchWithBypass(apiUrl, {
             headers: { 'Referer': playerUrl }
         });
 
-        const hexData = response.data;
+        const hexData = String(response?.data ?? '');
+        if (response?.status && response.status !== 200) return null;
+        if (/^\s*</.test(hexData)) return null;
         const cleanHex = hexData.replace(/[^0-9a-fA-F]/g, '');
         if (!cleanHex || cleanHex.length === 0) return null;
 
@@ -248,6 +299,45 @@ async function extractLoadM(playerUrl: string, referer: string, isSub: boolean =
     return null;
 }
 
+// --- ABYSS / MLOAD EXTRACTOR ---
+async function extractAbyssStream(playerUrl: string, pageUrl: string, isSub: boolean = false): Promise<Stream | null> {
+    const source = await extractAbyssSource(playerUrl, pageUrl);
+    if (!source) return null;
+
+    // Abyss never exposes a directly playable MP4: the source is encrypted
+    // and only served as 2 MiB chunks. Route it through the addon's range proxy.
+    const isSegmented = source.kind === 'segmented' && !!source.info;
+    const streamUrl = isSegmented
+        ? buildAbyssProxyUrl(source.info!, getAddonBaseUrl())
+        : source.url;
+    if (!streamUrl) return null;
+
+    return {
+        name: providerLabel('guardaflix'),
+        title: buildUnifiedStreamName({
+            baseTitle: source.quality || 'Stream',
+            isSub: isSub,
+            proxyOn: isSegmented,
+            provider: 'guardaflix',
+            playerName: 'Abyss',
+            hideProviderInTitle: true
+        }),
+        url: streamUrl,
+        behaviorHints: isSegmented
+            ? { notWebReady: true }
+            : {
+                notWebReady: true,
+                proxyHeaders: {
+                    request: {
+                        "Referer": `${source.origin}/`,
+                        "Origin": source.origin,
+                        "User-Agent": SHARED_HEADERS['User-Agent']
+                    }
+                }
+            }
+    };
+}
+
 // --- SEARCH & SCRAPE ---
 
 async function searchGuardaflix(query: string, year: string): Promise<string | null> {
@@ -266,12 +356,12 @@ async function searchGuardaflix(query: string, year: string): Promise<string | n
 
         // Cerca tutti i link che potrebbero essere risultati film
         const allLinks: { href: string, text: string }[] = [];
-        $('a[href*="/film/"]').each((_, el) => {
+        $('a[href*="/movies/"], a[href*="/film/"]').each((_, el) => {
             const href = $(el).attr('href');
             if (!href || href === '#') return;
             // Filtra link generici
-            if (/\/film\/?$/.test(href)) return;
-            if (!/\/film\/[a-z0-9-]+/i.test(href)) return;
+            if (/\/movies?\/?$/i.test(href) || /\/film\/?$/i.test(href)) return;
+            if (!/\/(?:movies|film)\/[a-z0-9-]+/i.test(href)) return;
 
             const text = $(el).text().trim();
             allLinks.push({ href: href.startsWith('http') ? href : `${getTargetDomain()}${href}`, text });
@@ -365,8 +455,11 @@ async function resolvePageStream(pageUrl: string): Promise<Stream[]> {
                 const currentSrc = src;
                 extractionPromises.push((async () => {
                     const localStreams: Stream[] = [];
-                    // Direct LoadM
-                    if (currentSrc.includes('loadm.cam') || currentSrc.includes('loadm')) {
+                    // Direct Abyss (mload.cam/mloadm.cam) or legacy LoadM
+                    if (isAbyssPlayerUrl(currentSrc)) {
+                        const stream = await extractAbyssStream(currentSrc, pageUrl, isSub);
+                        if (stream) localStreams.push(stream);
+                    } else if (currentSrc.includes('loadm')) {
                         const stream = await extractLoadM(currentSrc, pageUrl, isSub);
                         if (stream) localStreams.push(stream);
                     }
@@ -382,7 +475,9 @@ async function resolvePageStream(pageUrl: string): Promise<Stream[]> {
                                 let nSrc = $(nested).attr('data-src') || $(nested).attr('src');
                                 if (nSrc) {
                                     if (nSrc.startsWith('//')) nSrc = 'https:' + nSrc;
-                                    if (nSrc.includes('loadm.cam') || nSrc.includes('loadm')) {
+                                    if (isAbyssPlayerUrl(nSrc)) {
+                                        nestedPromises.push(extractAbyssStream(nSrc, pageUrl, isSub));
+                                    } else if (nSrc.includes('loadm')) {
                                         nestedPromises.push(extractLoadM(nSrc, pageUrl, isSub));
                                     }
                                 }
@@ -417,7 +512,10 @@ async function resolvePageStream(pageUrl: string): Promise<Stream[]> {
                 const currentSrc = src;
                 fallbackPromises.push((async () => {
                     const localStreams: Stream[] = [];
-                    if (currentSrc.includes('loadm.cam') || currentSrc.includes('loadm')) {
+                    if (isAbyssPlayerUrl(currentSrc)) {
+                        const stream = await extractAbyssStream(currentSrc, pageUrl, false);
+                        if (stream) localStreams.push(stream);
+                    } else if (currentSrc.includes('loadm')) {
                         const stream = await extractLoadM(currentSrc, pageUrl, false);
                         if (stream) localStreams.push(stream);
                     }
@@ -431,7 +529,9 @@ async function resolvePageStream(pageUrl: string): Promise<Stream[]> {
                                 let nSrc = $(nested).attr('data-src') || $(nested).attr('src');
                                 if (nSrc) {
                                     if (nSrc.startsWith('//')) nSrc = 'https:' + nSrc;
-                                    if (nSrc.includes('loadm.cam') || nSrc.includes('loadm')) {
+                                    if (isAbyssPlayerUrl(nSrc)) {
+                                        nestedPromises.push(extractAbyssStream(nSrc, pageUrl, false));
+                                    } else if (nSrc.includes('loadm')) {
                                         nestedPromises.push(extractLoadM(nSrc, pageUrl, false));
                                     }
                                 }
